@@ -43,7 +43,7 @@ function extractProtocolResponse(text: string): string {
 }
 
 export async function sendAndReadLastAssistant(page: Page, message: string, timeoutMs = 120000, maxResponseBytes = 2 * 1024 * 1024): Promise<string> {
-  const composer = await findUsableComposer(page, 15000);
+  let composer = await findUsableComposer(page, 15000);
   if (!composer) throw new NovaError('Champ de saisie ChatGPT introuvable.', 'BROWSER_SELECTOR_MISMATCH');
 
   const assistant = page.locator(CHATGPT_SELECTORS.assistantMessage);
@@ -65,11 +65,39 @@ export async function sendAndReadLastAssistant(page: Page, message: string, time
     }
   }
   if (!filled) throw new NovaError('Le champ de saisie ChatGPT a changé pendant son activation. Aucun message envoyé.', 'BROWSER_SELECTOR_MISMATCH');
-  const send = await findFirstVisible(page, CHATGPT_SELECTORS.sendButton);
-  if (send) await send.click({ timeout: 10000 });
-  else await composer.press('Enter', { timeout: 10000 });
+  let submitted = false;
+  let lastSendError: unknown;
+  for (let attempt = 1; attempt <= 3 && !submitted; attempt += 1) {
+    try {
+      const send = await findFirstVisible(page, CHATGPT_SELECTORS.sendButton);
+      if (send) await send.click({ timeout: 10000 });
+      else await composer.press('Enter', { timeout: 10000 });
+      submitted = true;
+    } catch (error) {
+      lastSendError = error;
+      const currentComposer = await findUsableComposer(page, 2000).catch(() => undefined);
+      const composerText = currentComposer
+        ? await currentComposer.inputValue().catch(() => currentComposer.innerText().catch(() => ''))
+        : '';
+      const stop = await findFirstVisible(page, CHATGPT_SELECTORS.stopButton).catch(() => undefined);
+      const assistantStarted = (await assistant.count().catch(() => beforeCount)) > beforeCount;
+      // A click can time out after ChatGPT accepted it. Never resend once the composer cleared or a reply started.
+      if (!composerText || !composerText.trim() || !composerText.includes(message) || stop || assistantStarted) {
+        submitted = true;
+        break;
+      }
+      if (attempt < 3) {
+        console.log(`retrying send ${attempt + 1}/3…`);
+        await page.waitForTimeout(attempt * 800);
+        const refreshed = await findUsableComposer(page, 3000);
+        if (refreshed) composer = refreshed;
+      }
+    }
+  }
+  if (!submitted) {
+    throw new NovaError(`Le clic d’envoi a échoué après 3 tentatives ; le message est resté dans le champ. ${lastSendError instanceof Error ? lastSendError.message : ''}`, 'BROWSER_SEND_FAILED', { cause: lastSendError });
+  }
 
-  console.log('[Nova Agent] Message envoyé ; attente de la réponse ChatGPT…');
   const deadline = Date.now() + timeoutMs;
   let responseStarted = false;
   let previous = '';

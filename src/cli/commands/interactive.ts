@@ -3,6 +3,7 @@ import { runFix } from '../../session/orchestrator.js';
 import { isInteractive } from '../../utils/fs.js';
 import { ask } from '../prompts.js';
 import { statusCommand } from './status.js';
+import { renderBrand, renderStatus } from '../terminal-ui.js';
 
 export async function interactiveCommand(projectInput = process.cwd()): Promise<void> {
   if (!isInteractive()) {
@@ -11,8 +12,7 @@ export async function interactiveCommand(projectInput = process.cwd()): Promise<
   }
 
   const projectRoot = path.resolve(projectInput);
-  console.log(`Nova Agent · ${projectRoot}`);
-  console.log('Décris une tâche, ou utilise /status, /help, /exit. Les commandes CLI restent disponibles.');
+  renderBrand(projectRoot);
 
   while (true) {
     let input: string;
@@ -27,7 +27,7 @@ export async function interactiveCommand(projectInput = process.cwd()): Promise<
     if (!request) continue;
     if (['/exit', '/quit'].includes(request.toLowerCase())) return;
     if (request === '/help') {
-      console.log('Écris une demande pour lancer une analyse. /status affiche le projet, /exit ferme Nova.');
+      console.log('Écris une demande pour démarrer une session. /status affiche le projet, /exit ferme Nova. Pendant une approbation, tape approve all pour appliquer tous les fichiers du patch courant.');
       continue;
     }
     if (request === '/status') {
@@ -38,7 +38,7 @@ export async function interactiveCommand(projectInput = process.cwd()): Promise<
     try {
       await runFix({ projectRoot, problem: request });
     } catch {
-      console.log('La session est enregistrée ; utilise /status ou relance une nouvelle demande.');
+      renderStatus('ERROR', 'session enregistrée · consulte /status ou relance la demande');
     }
   }
 }

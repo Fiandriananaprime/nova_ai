@@ -53,13 +53,13 @@ program.command('fix')
   .argument('<problem>', 'description du problème à corriger')
   .option('-p, --project <path>', 'projet cible', '.')
   .option('--provider <id>', 'chatgpt-web, claude-web, gemini-web ou mock')
-  .option('--max-cycles <number>', 'nombre maximal d’échanges', '6')
+  .option('--max-cycles <number>', 'limite facultative du nombre d’échanges (1 à 20)')
   .option('--dry-run', 'prépare et valide le patch sans modifier les sources')
   .option('--no-apply', 'prépare le patch mais ne l’applique jamais')
-  .action(async (problem: string, options: { project: string; provider?: string; maxCycles: string; dryRun?: boolean; apply?: boolean }) => {
-    const cycles = Number(options.maxCycles);
-    if (!Number.isInteger(cycles) || cycles < 1 || cycles > 20) throw new NovaError('--max-cycles doit être un entier compris entre 1 et 20.', 'INVALID_MAX_CYCLES');
-    await fixCommand(problem, { ...options, maxCycles: String(cycles), noApply: options.apply === false });
+  .action(async (problem: string, options: { project: string; provider?: string; maxCycles?: string; dryRun?: boolean; apply?: boolean }) => {
+    const cycles = options.maxCycles === undefined ? undefined : Number(options.maxCycles);
+    if (cycles !== undefined && (!Number.isInteger(cycles) || cycles < 1 || cycles > 20)) throw new NovaError('--max-cycles doit être un entier compris entre 1 et 20.', 'INVALID_MAX_CYCLES');
+    await fixCommand(problem, { ...options, ...(cycles === undefined ? {} : { maxCycles: String(cycles) }), noApply: options.apply === false });
   });
 
 program.command('diff').description('Affiche le dernier patch en attente ou appliqué.')
@@ -97,6 +97,6 @@ try {
   else await program.parseAsync(process.argv);
 } catch (error) {
   const issue = asNovaError(error);
-  console.error(`Erreur Nova Agent [${issue.code}] : ${issue.message}`);
+  console.error(`ERROR ${issue.code}: ${issue.message}`);
   process.exitCode = 1;
 }

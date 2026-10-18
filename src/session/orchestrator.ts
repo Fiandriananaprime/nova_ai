@@ -6,13 +6,14 @@ import { readProjectFile } from '../context/file-reader.js';
 import { readOptional, id } from '../utils/fs.js';
 import { NovaError, asNovaError } from '../utils/errors.js';
 import { validateRequestedFiles } from '../protocol/validator.js';
-import type { AIProvider } from '../protocol/schema.js';
+import type { AIProvider, AIResponse } from '../protocol/schema.js';
 import { validatePatch } from '../patches/validator.js';
 import { applyOperation } from '../history/operation-service.js';
 import { saveReport, type OperationRecord } from '../history/markdown-reports.js';
 import { upsertOperation } from '../history/records.js';
 import { ask, approveOrReject } from '../cli/prompts.js';
 import { renderPatchPreview } from '../cli/patch-preview.js';
+import { renderDone, renderEvent, renderStatus, renderSummary, startThinking } from '../cli/terminal-ui.js';
 import { isInteractive } from '../utils/fs.js';
 import { refreshTree } from '../context/tree.js';
 import { PROJECT_CONTEXT_TEMPLATE } from '../context/descriptions.js';
@@ -198,9 +199,11 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
   if (options.problem?.trim()) session.problem = options.problem;
   if (!session.problem.trim()) throw new NovaError('Description du problème manquante.', 'TASK_DESCRIPTION_REQUIRED');
   if (session.problem.length > 10000) throw new NovaError('La description du problème dépasse la limite locale de 10 000 caractères.', 'TASK_DESCRIPTION_TOO_LARGE');
-  const maxCycles = options.resumeSession
-    ? session.cycle + (options.maxCycles ?? config.protocol.maxCycles)
-    : (options.maxCycles ?? config.protocol.maxCycles);
+  const cycleLimit = options.maxCycles === undefined
+    ? undefined
+    : options.resumeSession
+      ? session.cycle + options.maxCycles
+      : options.maxCycles;
   const rawContext = await readProjectContext(projectRoot);
   const { tree: rawTree } = await refreshTree(projectRoot);
   const contextPacket = fitContext(rawContext, rawTree, config.protocol.maxContextChars);
@@ -239,10 +242,9 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
     provider = await getProvider(session.providerId, projectRoot);
     provider.restoreState?.(session.providerState);
 
-    while (session.cycle < maxCycles) {
+    while (cycleLimit === undefined || session.cycle < cycleLimit) {
       session.cycle += 1;
-      console.log(`[Nova Agent] Cycle ${session.cycle}/${maxCycles} : envoi au fournisseur puis attente de sa réponse…`);
-      transition(session, 'SENDING_PROMPT', `Envoi de l’échange ${session.cycle}/${maxCycles} au fournisseur ${session.providerId}.`);
+      transition(session, 'SENDING_PROMPT', `Envoi de l’échange ${session.cycle} au fournisseur ${session.providerId}.`);
       await saveSession(session);
       const request = {
         taskId: session.id,
@@ -257,9 +259,20 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       session.generalPromptSent = true;
       transition(session, 'WAITING_FOR_RESPONSE', `Attente de la réponse ${session.cycle}.`);
       await saveSession(session);
+      const deliveredFiles = request.files ?? [];
       outgoingFiles = [];
-      const response = await provider.send(request);
-      console.log(`[Nova Agent] Réponse reçue : ${response.status}.`);
+      const stopThinking = startThinking();
+      let response: AIResponse;
+      try {
+        response = await provider.send(request);
+      } finally {
+        stopThinking();
+      }
+      if (session.fileTransferActive) {
+        if (session.fileTransferChunkIndex === 1) for (const file of deliveredFiles) renderEvent('read', file.path);
+      } else {
+        for (const file of deliveredFiles) renderEvent('read', file.path);
+      }
       session.transmittedFileHashes = session.transmittedFileHashes ?? {};
       if (!session.fileTransferActive) {
         for (const file of request.files ?? []) session.transmittedFileHashes[file.path] = file.sha256;
@@ -340,12 +353,14 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       if (response.status === 'DONE') {
         transition(session, 'DONE', response.reason ?? 'Le fournisseur indique que la tâche est terminée sans patch.');
         await saveSession(session);
-        console.log(`\nTâche terminée sans patch. Session : ${session.id}\n${response.reason ?? ''}`);
+        renderDone([], projectRoot);
+        if (response.reason) renderSummary(response.reason);
         return session;
       }
 
       if (response.status === 'NEED_INFO') {
         const question = response.question!;
+        renderStatus('NEED_INFO');
         transition(session, 'WAITING_FOR_USER', question);
         await saveSession(session);
         console.log(`\nL’IA a besoin d’une précision :\n${question}`);
@@ -370,7 +385,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
 
       if (response.status === 'NEED_FILES') {
         const requested = validateRequestedFiles(response, config.protocol.maxFilesPerRequest);
-        console.log(`[Nova Agent] L’IA demande : ${requested.join(', ')}. Lecture sécurisée du projet…`);
+        renderStatus('NEED_FILES', requested.join(', '));
         const signature = [...requested].sort().join('|');
         const repeated = session.fileRequestSignatures.includes(signature);
         session.fileRequestSignatures.push(signature);
@@ -429,7 +444,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           session.fileTransferActive = false;
           nextMessage = `Résultat de NEED_FILES. Fichiers transmis ou déjà connus :\n${loaded.length ? loaded.join('\n') : '(aucun)'}\nDemandes refusées ou fichiers absents :\n${denied.length ? denied.join('\n') : '(aucun)'}\nPoursuis le diagnostic. Si une information manque encore, utilise NEED_INFO. Ne propose PATCH_READY que si tu as assez de contexte et un diff unifié applicable. Réponse uniquement JSON nova-agent/1.`;
         }
-        console.log(`[Nova Agent] ${loaded.length} fichier(s) disponible(s), ${denied.length} demande(s) refusée(s) ou introuvable(s)${denied.length ? ` : ${denied.join(' ; ')}` : ''}. Poursuite de l’échange…`);
+        if (denied.length) renderStatus('files unavailable', denied.join(' ; '));
         // Save the retry metadata before the next browser call, but never store file contents.
         session.pendingFilePaths = outgoingFiles.map((file) => file.path);
         session.pendingMessage = nextMessage;
@@ -438,6 +453,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       }
 
       if (response.status === 'PATCH_READY') {
+        renderStatus('PATCH_READY', 'diff préparé');
         transition(session, 'VALIDATING_PATCH', 'Validation du patch, des chemins et des empreintes d’origine.');
         const prepared = await validatePatch(projectRoot, response.patch!, session.fileHashes, config.patches.maxPatchBytes);
         if (prepared.files.length === 0) throw new NovaError('Le patch ne contient aucun fichier modifiable.', 'PATCH_EMPTY');
@@ -465,12 +481,14 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         const reportPath = await saveReport(projectRoot, record);
         await upsertOperation(projectRoot, record);
         await saveSession(session);
-        console.log(`\nRésumé : ${record.summary}\n${renderPatchPreview(projectRoot, prepared.files, response.patch!, reportPath)}\n`);
+        renderSummary(record.summary);
+        console.log(`\n${renderPatchPreview(projectRoot, prepared.files, response.patch!, reportPath)}\n`);
 
         if (options.dryRun || options.noApply) {
-          console.log(`Patch préparé sans modification des sources. Diff : ${patchRelativePath}`);
+          renderStatus('PATCH_READY', `préparé sans application · ${patchRelativePath}`);
           transition(session, 'DONE', options.dryRun ? 'Fin dry-run : aucune source modifiée.' : 'Patch préparé mais non appliqué.');
           await saveSession(session);
+          renderDone([reportPath], projectRoot);
           return session;
         }
         transition(session, 'WAITING_FOR_APPROVAL', 'Attente de la confirmation explicite de l’utilisateur.');
@@ -488,7 +506,8 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           await upsertOperation(projectRoot, record);
           transition(session, 'DONE', 'Patch rejeté ; aucune source modifiée.');
           await saveSession(session);
-          console.log('Patch refusé. Aucun fichier source modifié.');
+          renderStatus('REJECTED', 'aucun fichier source modifié');
+          renderDone([reportPath], projectRoot);
           return session;
         }
         transition(session, 'APPLYING_PATCH', 'L’utilisateur a accepté le patch. Revalidation avant application.');
@@ -497,24 +516,24 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           transition(session, stage, stage === 'RUNNING_TESTS' ? 'Exécution des tests explicitement configurés.' : 'Enregistrement de l’historique auxiliaire et du rapport.');
           await saveSession(session);
         });
+        for (const file of prepared.files) renderEvent('write', file.path);
         await saveSession(session);
         transition(session, 'DONE', 'Correction terminée.');
         await saveSession(session);
-        console.log(`Correction appliquée. Opération : ${operationId}`);
+        renderDone([reportPath], projectRoot);
         return session;
       }
     }
-    transition(session, 'PAUSED', `Nombre maximal de cycles atteint (${maxCycles}).`);
+    transition(session, 'PAUSED', `Limite facultative de cycles atteinte (${cycleLimit}).`);
     session.error = 'MAX_CYCLES_REACHED';
     await saveSession(session);
-    console.log(`Limite de cycles atteinte. Reprends avec : npm run dev -- resume ${session.id}`);
+    console.log(`Limite facultative de cycles atteinte. Reprends avec : npm run dev -- resume ${session.id}`);
     return session;
   } catch (error) {
     const issue = asNovaError(error);
     session.error = `${issue.code}: ${issue.message}`;
     transition(session, 'ERROR', session.error);
     await saveSession(session).catch(() => undefined);
-    console.error(`Erreur Nova Agent [${issue.code}] : ${issue.message}`);
     throw issue;
   } finally {
     if (provider) {

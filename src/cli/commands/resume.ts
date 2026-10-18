@@ -4,9 +4,11 @@ import { runFix } from '../../session/orchestrator.js';
 import { readOperations } from '../../history/records.js';
 import { ask, confirm } from '../prompts.js';
 import { isInteractive } from '../../utils/fs.js';
+import { renderBrand } from '../terminal-ui.js';
 
 export async function resumeCommand(sessionId: string, projectInput = '.', providerId?: string): Promise<void> {
   const root = path.resolve(projectInput);
+  renderBrand(root);
   const session = await loadSession(root, sessionId);
   const operations = await readOperations(root);
   const pending = session.pendingOperationId

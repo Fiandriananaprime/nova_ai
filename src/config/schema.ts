@@ -12,7 +12,8 @@ export const ConfigSchema = z.object({
   }).default({}),
   protocol: z.object({
     version: z.literal('nova-agent/1').default('nova-agent/1'),
-    maxCycles: z.number().int().min(1).max(20).default(6),
+    // Kept optional for compatibility with existing project configs; the CLI ignores it by default.
+    maxCycles: z.number().int().min(1).max(20).optional(),
     maxFilesPerRequest: z.number().int().min(1).max(50).default(15),
     maxFileSizeBytes: z.number().int().min(1024).max(10 * 1024 * 1024).default(1024 * 1024),
     maxTotalFileBytes: z.number().int().min(1024).max(32 * 1024 * 1024).default(4 * 1024 * 1024),

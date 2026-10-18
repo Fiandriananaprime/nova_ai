@@ -18,9 +18,9 @@ export async function confirm(question: string, defaultValue = false): Promise<b
 
 export async function approveOrReject(question: string): Promise<boolean> {
   while (true) {
-    const answer = (await ask(`${question} Tape approve ou reject : `)).toLowerCase();
-    if (answer === 'approve') return true;
+    const answer = (await ask(`${question} Tape approve (tout le patch de cette session), approve all, ou reject : `)).trim().toLowerCase();
+    if (answer === 'approve' || answer === 'approve all') return true;
     if (answer === 'reject' || answer === 'rejected') return false;
-    console.log('Réponse invalide. Tape approve ou reject.');
+    console.log('Réponse invalide. Tape approve, approve all ou reject.');
   }
 }

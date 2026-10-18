@@ -81,7 +81,7 @@ nova.cmd
 nova fix "Analyse src/server.ts" --no-apply
 ```
 
-Sans argument, Nova ouvre une interface interactive dans le terminal. Décris une tâche à l’invite `nova ›`; utilise `/status`, `/help` ou `/exit`. Les commandes CLI restent disponibles. Nova utilise le dossier courant comme projet. Ajoute `--project "D:\Project\AutreProjet"` pour cibler un autre dossier. Sans installation globale : `npm.cmd run dev -- <commande>`.
+Sans argument, Nova ouvre une interface interactive dans le terminal avec son logo et l’état `thinking` pendant les réponses. Décris une tâche à l’invite `nova ›`; les événements `read` et `write` indiquent les fichiers transmis ou modifiés. À la fin, le lien du rapport `.md` ouvre le diff dans les terminaux compatibles OSC 8. Pendant l’approbation, `approve all` valide tous les fichiers du patch courant. Utilise `/status`, `/help` ou `/exit`. Les commandes CLI restent disponibles. Nova utilise le dossier courant comme projet. Ajoute `--project "D:\Project\AutreProjet"` pour cibler un autre dossier. Sans installation globale : `npm.cmd run dev -- <commande>`.
 
 ## Premier lancement
 
@@ -251,7 +251,6 @@ Extrait de `.nova_agents/config.json` :
   },
   "protocol": {
     "version": "nova-agent/1",
-    "maxCycles": 6,
     "maxFilesPerRequest": 15,
     "maxFileSizeBytes": 1048576,
     "maxTotalFileBytes": 4194304,
