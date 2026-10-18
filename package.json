@@ -1,6 +1,6 @@
 {
   "name": "nova-agent",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Agent IA local de développement piloté par CLI, Edge et patchs validés",
   "type": "module",
   "bin": {
