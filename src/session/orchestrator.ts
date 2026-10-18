@@ -354,7 +354,8 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         transition(session, 'DONE', response.reason ?? 'Le fournisseur indique que la tâche est terminée sans patch.');
         await saveSession(session);
         renderDone([], projectRoot);
-        if (response.reason) renderSummary(response.reason);
+        const completionSummary = response.summary ?? response.reason;
+        if (completionSummary) renderSummary(completionSummary);
         return session;
       }
 
