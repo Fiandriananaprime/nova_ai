@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest';
+import { parseAIResponse } from '../src/protocol/parser.js';
+import { validateRequestedFiles } from '../src/protocol/validator.js';
+import { parsePatch } from '../src/patches/parser.js';
+
+const protocol = 'nova-agent/1';
+
+describe('protocol parser', () => {
+  it('parses a valid JSON response', () => {
+    expect(parseAIResponse(JSON.stringify({ protocol, status: 'DONE', reason: 'No changes needed.' })).status).toBe('DONE');
+  });
+
+  it('accepts one fenced JSON object, but not extra prose', () => {
+    expect(parseAIResponse('```json\n{"protocol":"nova-agent/1","status":"DONE"}\n```').status).toBe('DONE');
+    expect(() => parseAIResponse('Here is the answer: {"protocol":"nova-agent/1","status":"DONE"}')).toThrow();
+  });
+
+  it('rejects unknown status and NEED_INFO without a question', () => {
+    expect(() => parseAIResponse('{"protocol":"nova-agent/1","status":"MAGIC"}')).toThrow();
+    expect(() => parseAIResponse('{"protocol":"nova-agent/1","status":"NEED_INFO"}')).toThrow();
+  });
+
+  it('normalizes requested file paths and rejects path traversal', () => {
+    const response = parseAIResponse(JSON.stringify({ protocol, status: 'NEED_FILES', files: ['src\\auth.ts'] }));
+    expect(validateRequestedFiles(response, 5)).toEqual(['src/auth.ts']);
+    const traversal = parseAIResponse(JSON.stringify({ protocol, status: 'NEED_FILES', files: ['../.env'] }));
+    expect(() => validateRequestedFiles(traversal, 5)).toThrow();
+  });
+});
+
+describe('unified patch parser', () => {
+  it('parses a standard modification patch', () => {
+    const patch = [
+      'diff --git a/src/app.ts b/src/app.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/app.ts',
+      '+++ b/src/app.ts',
+      '@@ -1 +1 @@',
+      '-const value = 1;',
+      '+const value = 2;',
+      '',
+    ].join('\n');
+    expect(parsePatch(patch)).toEqual([{ path: 'src/app.ts', oldPath: 'src/app.ts', newPath: 'src/app.ts', created: false, deleted: false }]);
+  });
+
+  it('recognizes file creation and refuses traversal or binary patches', () => {
+    const create = 'diff --git a/src/new.ts b/src/new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1 @@\n+export {}\n';
+    expect(parsePatch(create)[0]?.created).toBe(true);
+    const traversal = 'diff --git a/../evil.ts b/../evil.ts\n--- a/../evil.ts\n+++ b/../evil.ts\n@@ -1 +1 @@\n-a\n+b\n';
+    expect(() => parsePatch(traversal)).toThrow();
+    expect(() => parsePatch('GIT binary patch')).toThrow();
+  });
+});

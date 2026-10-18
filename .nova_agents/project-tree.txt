@@ -1,0 +1,104 @@
+nova-agent/
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── SECURITY.md
+│   └── TEST-RESULTS.md
+├── examples/
+│   ├── operation-report.md
+│   ├── project-context.md
+│   └── session-need-files-need-info.md
+├── prompts/
+│   ├── protocol.md
+│   └── system.md
+├── src/
+│   ├── ai/
+│   │   ├── providers/
+│   │   │   ├── chatgpt/
+│   │   │   │   └── provider.ts
+│   │   │   ├── claude/
+│   │   │   │   └── provider.ts
+│   │   │   ├── gemini/
+│   │   │   │   └── provider.ts
+│   │   │   └── mock/
+│   │   │       └── provider.ts
+│   │   ├── capabilities.ts
+│   │   ├── provider.ts
+│   │   └── registry.ts
+│   ├── browser/
+│   │   ├── selectors/
+│   │   │   └── chatgpt.ts
+│   │   ├── diagnostics.ts
+│   │   ├── edge.ts
+│   │   ├── page-inspector.ts
+│   │   ├── response-reader.ts
+│   │   └── session.ts
+│   ├── cli/
+│   │   ├── commands/
+│   │   │   ├── apply.ts
+│   │   │   ├── browser.ts
+│   │   │   ├── context.ts
+│   │   │   ├── diff.ts
+│   │   │   ├── fix.ts
+│   │   │   ├── history.ts
+│   │   │   ├── init.ts
+│   │   │   ├── model.ts
+│   │   │   ├── resume.ts
+│   │   │   ├── status.ts
+│   │   │   └── undo.ts
+│   │   ├── index.ts
+│   │   └── prompts.ts
+│   ├── config/
+│   │   ├── loader.ts
+│   │   └── schema.ts
+│   ├── context/
+│   │   ├── descriptions.ts
+│   │   ├── file-reader.ts
+│   │   ├── ignore.ts
+│   │   ├── scanner.ts
+│   │   ├── token-budget.ts
+│   │   └── tree.ts
+│   ├── history/
+│   │   ├── git-repository.ts
+│   │   ├── markdown-reports.ts
+│   │   ├── operation-service.ts
+│   │   ├── records.ts
+│   │   ├── rollback.ts
+│   │   └── snapshots.ts
+│   ├── patches/
+│   │   ├── apply.ts
+│   │   ├── parser.ts
+│   │   ├── prepare.ts
+│   │   └── validator.ts
+│   ├── protocol/
+│   │   ├── parser.ts
+│   │   ├── prompts.ts
+│   │   ├── schema.ts
+│   │   └── validator.ts
+│   ├── security/
+│   │   ├── agent-files.ts
+│   │   ├── paths.ts
+│   │   └── permissions.ts
+│   ├── session/
+│   │   ├── orchestrator.ts
+│   │   ├── persistence.ts
+│   │   └── state-machine.ts
+│   └── utils/
+│       ├── errors.ts
+│       └── fs.ts
+├── tests/
+│   ├── agent-files.test.ts
+│   ├── context.test.ts
+│   ├── git-repository.test.ts
+│   ├── mock-provider.test.ts
+│   ├── patch-apply.test.ts
+│   ├── protocol.test.ts
+│   ├── security.test.ts
+│   └── session-persistence.test.ts
+├── .gitignore
+├── .npmrc
+├── LICENSE
+├── package-lock.json
+├── package.json
+├── README.md
+├── tsconfig.json
+└── vitest.config.ts
