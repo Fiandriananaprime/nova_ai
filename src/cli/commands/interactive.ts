@@ -4,6 +4,7 @@ import { isInteractive } from '../../utils/fs.js';
 import { ask } from '../prompts.js';
 import { statusCommand } from './status.js';
 import { renderBrand, renderStatus } from '../terminal-ui.js';
+import { modelList, modelUse } from './model.js';
 
 export async function interactiveCommand(projectInput = process.cwd()): Promise<void> {
   if (!isInteractive()) {
@@ -27,11 +28,22 @@ export async function interactiveCommand(projectInput = process.cwd()): Promise<
     if (!request) continue;
     if (['/exit', '/quit'].includes(request.toLowerCase())) return;
     if (request === '/help') {
-      console.log('Écris une demande pour démarrer une session. /status affiche le projet, /exit ferme Nova. Pendant une approbation, tape approve all pour appliquer tous les fichiers du patch courant.');
+      console.log('Écris une demande pour démarrer une session. /status affiche le projet, /model list liste les modèles, /model <nom> change de modèle, /exit ferme Nova. Pendant une approbation, tape approve all pour appliquer tous les fichiers du patch courant.');
       continue;
     }
     if (request === '/status') {
       await statusCommand(projectRoot);
+      continue;
+    }
+    const modelCommand = request.match(/^\/model(?:\s+(.*))?$/i);
+    if (modelCommand) {
+      const modelName = modelCommand[1]?.trim();
+      try {
+        if (!modelName || modelName.toLowerCase() === 'list') await modelList(projectRoot);
+        else await modelUse(projectRoot, modelName);
+      } catch (error) {
+        renderStatus('ERROR', error instanceof Error ? error.message : String(error));
+      }
       continue;
     }
 

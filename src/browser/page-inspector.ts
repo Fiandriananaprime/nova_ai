@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import { CHATGPT_SELECTORS } from './selectors/chatgpt.js';
+import type { WebProviderSelectors } from './selectors/web-providers.js';
 import { NovaError } from '../utils/errors.js';
 
 export async function findFirstVisible(page: Page, selectors: string[]) {
@@ -11,10 +12,10 @@ export async function findFirstVisible(page: Page, selectors: string[]) {
   return undefined;
 }
 
-export async function findUsableComposer(page: Page, timeoutMs = 12000) {
+export async function findUsableComposer(page: Page, selectors = CHATGPT_SELECTORS.composer, timeoutMs = 12000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    for (const selector of CHATGPT_SELECTORS.composer) {
+    for (const selector of selectors) {
       const locator = page.locator(selector).last();
       try {
         if (await locator.isVisible({ timeout: 300 }) && await locator.isEnabled() && await locator.isEditable()) return locator;
@@ -23,6 +24,20 @@ export async function findUsableComposer(page: Page, timeoutMs = 12000) {
     await page.waitForTimeout(300);
   }
   return undefined;
+}
+
+export async function inspectWebProviderPage(page: Page, host: string, selectors: WebProviderSelectors): Promise<{ authenticated: boolean; usable: boolean; detail: string }> {
+  const url = new URL(page.url());
+  const composer = await findUsableComposer(page, selectors.composer, 3000);
+  if (composer) return { authenticated: true, usable: true, detail: 'Interface de conversation détectée.' };
+
+  const bodyText = (await page.locator('body').innerText().catch(() => '')).slice(0, 4000);
+  const loginPage = url.hostname === 'accounts.google.com'
+    || /\/login|\/signin|\/sign-in/i.test(url.pathname)
+    || /sign in|log in|se connecter|connexion|continue with google/i.test(bodyText);
+  if (loginPage) return { authenticated: false, usable: false, detail: 'Connecte-toi manuellement dans Edge pour ce fournisseur.' };
+  if (url.hostname !== host) return { authenticated: false, usable: false, detail: `Page inattendue : ${url.hostname}.` };
+  return { authenticated: true, usable: false, detail: 'Champ de conversation introuvable : les sélecteurs du fournisseur ont peut-être changé.' };
 }
 
 export async function inspectChatGPTPage(page: Page): Promise<{ authenticated: boolean; usable: boolean; detail: string }> {

@@ -9,12 +9,16 @@ export class EdgeSession {
   private page: Page | undefined;
   constructor(private readonly channel = 'msedge', private readonly timeoutMs = 120000) {}
 
-  async openChatGPT(url = 'https://chatgpt.com/'): Promise<Page> {
+  async openProvider(url = 'https://chatgpt.com/'): Promise<Page> {
     const launched = await launchEdge({ channel: this.channel, timeoutMs: this.timeoutMs, url });
     this.browser = launched.browser;
     this.context = launched.context;
     this.page = launched.page;
     return launched.page;
+  }
+
+  async openChatGPT(url = 'https://chatgpt.com/'): Promise<Page> {
+    return this.openProvider(url);
   }
 
   async assertReady(): Promise<Page> {

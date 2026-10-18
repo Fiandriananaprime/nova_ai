@@ -2,7 +2,7 @@
 
 **Nova Agent** est un agent local de développement piloté par CLI. Il examine l'arborescence d'un projet, échange avec un fournisseur IA par l'interface Web, demande les fichiers précis dont il a besoin, prépare un patch unifié, montre le diff, attend une confirmation, applique la correction et conserve un historique indépendant avec rapport Markdown et annulation vérifiée.
 
-> État du projet : le cœur local, le protocole, le scanner, la validation des patchs, l'historique auxiliaire et les tests automatisés sont implémentés dans le code source. L'adaptateur ChatGPT Web dépend des sélecteurs du site et doit être validé avec une session Edge réelle. Les adaptateurs Claude et Gemini sont explicitement indiqués comme non implémentés. L'intégration Web n'a pas été vérifiée en direct par cette livraison.
+> État du projet : le cœur local, le protocole, le scanner, la validation des patchs et l'historique auxiliaire sont implémentés. Les adaptateurs Web ChatGPT, Claude et Gemini utilisent Edge avec connexion manuelle ; leurs sélecteurs doivent être vérifiés avec chaque interface réelle et peuvent évoluer.
 
 ## Sommaire
 
@@ -81,7 +81,7 @@ nova.cmd
 nova fix "Analyse src/server.ts" --no-apply
 ```
 
-Sans argument, Nova ouvre une interface interactive dans le terminal avec son logo et l’état `thinking` pendant les réponses. Décris une tâche à l’invite `nova ›`; les événements `read` et `write` indiquent les fichiers transmis ou modifiés. À la fin, le lien du rapport `.md` ouvre le diff dans les terminaux compatibles OSC 8. Pendant l’approbation, `approve all` valide tous les fichiers du patch courant. Utilise `/status`, `/help` ou `/exit`. Les commandes CLI restent disponibles. Nova utilise le dossier courant comme projet. Ajoute `--project "D:\Project\AutreProjet"` pour cibler un autre dossier. Sans installation globale : `npm.cmd run dev -- <commande>`.
+Sans argument, Nova ouvre une interface interactive dans le terminal avec son logo et l’état `thinking` pendant les réponses. Décris une tâche à l’invite `nova ›`; les événements `read` et `write` indiquent les fichiers transmis ou modifiés. À la fin, le lien du rapport `.md` ouvre le diff dans les terminaux compatibles OSC 8. Pendant l’approbation, `approve all` valide tous les fichiers du patch courant. Utilise `/model list` pour choisir entre `chatgpt`, `claude` et `gemini`, ou `/model <nom>` pour changer le modèle actif du projet. Les commandes CLI restent disponibles. Nova utilise le dossier courant comme projet. Ajoute `--project "D:\Project\AutreProjet"` pour cibler un autre dossier. Sans installation globale : `npm.cmd run dev -- <commande>`.
 
 ## Premier lancement
 
@@ -127,7 +127,7 @@ Il est indépendant du profil personnel Edge. Évite de lancer deux instances No
 npm run dev -- model list
 ```
 
-`chatgpt-web` est l'adaptateur Web implémenté, mais nécessite Edge, une session valide et une interface compatible. `mock` sert aux tests locaux et ne réalise pas une correction réelle. `claude-web` et `gemini-web` sont des emplacements réservés et retournent une erreur explicite.
+ChatGPT, Claude et Gemini sont disponibles via leurs interfaces Web dans Edge et nécessitent une connexion manuelle. `mock` sert aux tests locaux et ne réalise pas une correction réelle. Utilise `/model list` dans l’interface interactive pour voir le modèle actif et les choix.
 
 ### 5. Lancer un diagnostic
 
@@ -171,8 +171,8 @@ npm run dev -- undo --project "D:\Project\MonProjet"
 | `nova-agent undo` | Annule la dernière opération sûre et vérifiable. |
 | `nova-agent history` | Liste rapports, statuts, tests et commits auxiliaires. |
 | `nova-agent resume <session-id>` | Reprend une session locale persistée. |
-| `nova-agent model list` | Liste les fournisseurs et leurs capacités connues. |
-| `nova-agent model use <provider-id>` | Change le fournisseur par défaut. |
+| `nova-agent model list` | Liste les modèles et le modèle actif du projet. |
+| `nova-agent model use <model>` | Change le modèle par défaut (`chatgpt`, `claude`, `gemini` ou `mock`). |
 
 Les commandes qui prennent en charge un projet acceptent `--project <path>`. Exemple PowerShell avec espaces :
 
@@ -305,9 +305,9 @@ La détection heuristique des secrets ne garantit pas l'identification de chaque
 ## Fournisseurs IA
 
 - **`chatgpt-web`** : Playwright ouvre Edge via `channel: "msedge"` et le profil dédié. La connexion est manuelle. Les sélecteurs et l'extraction sont centralisés pour faciliter le diagnostic, mais l'interface ChatGPT peut évoluer.
+- **`claude-web`** : utilise l’interface Claude dans le même profil Edge dédié. La connexion est manuelle et les sélecteurs peuvent évoluer.
+- **`gemini-web`** : utilise l’interface Gemini dans le même profil Edge dédié. La connexion est manuelle et les sélecteurs peuvent évoluer.
 - **`mock`** : renvoie `DONE` de façon déterministe par défaut et permet d'injecter un scénario dans les tests. Il n'est pas destiné à réparer un vrai projet.
-- **`claude-web`** : réservé, non implémenté. L'adaptateur échoue explicitement.
-- **`gemini-web`** : réservé, non implémenté. L'adaptateur échoue explicitement.
 
 Nova Agent ne contourne pas CAPTCHA, quotas, contrôles d'accès ou mécanismes de connexion. Il n'utilise pas les cookies ou jetons du profil personnel.
 
@@ -337,11 +337,11 @@ N'affirme pas que le test web a réussi sans l'avoir exécuté.
 
 - Les interfaces Web ne proposent pas de contrat DOM stable ; l'adaptateur ChatGPT peut nécessiter une mise à jour de sélecteurs.
 - Ce dépôt n'inclut ni token API, ni connexion programmée, ni service distant.
-- Claude Web et Gemini Web ne sont pas implémentés.
+- Les adaptateurs Claude et Gemini s'appuient sur les sélecteurs courants de leurs interfaces Web, sans contrat DOM stable ; une évolution des sites peut nécessiter une mise à jour.
 - Les patchs binaires et renamings de fichiers ne sont pas pris en charge par le validateur actuel.
 - Le scanner applique les négations de type `.gitignore` mais les règles d'exclusion de sécurité (`node_modules`, `.git`, `.nova_agents`, etc.) restent prioritaires.
 - La restauration des données est locale et ne constitue pas une sauvegarde hors machine.
-- Le code n'a pas encore été validé dans un parcours réel Edge/ChatGPT depuis cet environnement.
+- Les parcours réels Edge/Claude et Edge/Gemini n'ont pas été exécutés depuis cet environnement.
 
 ## Structure du code
 

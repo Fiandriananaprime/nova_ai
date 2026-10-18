@@ -86,7 +86,8 @@ program.command('resume')
   .action(async (sessionId: string, options: { project: string; provider?: string }) => resumeCommand(sessionId, options.project, options.provider));
 
 const model = program.command('model').description('Liste et sélectionne les fournisseurs IA.');
-model.command('list').description('Liste les fournisseurs intégrés et leur état connu.').action(async () => modelList());
+model.command('list').description('Liste les modèles intégrés et le modèle actif.').option('-p, --project <path>', 'projet cible', '.')
+  .action(async (options: { project: string }) => modelList(path.resolve(options.project)));
 model.command('use <provider-id>').description('Sélectionne le fournisseur par défaut.').option('-p, --project <path>', 'projet cible', '.')
   .action(async (providerId: string, options: { project: string }) => modelUse(path.resolve(options.project), providerId));
 

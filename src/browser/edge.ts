@@ -102,7 +102,11 @@ async function attachToEdge(options: { timeoutMs: number; url?: string }): Promi
     const context = browser.contexts()[0];
     if (!context) throw new NovaError('Aucun contexte Edge disponible sur le profil Nova.', 'BROWSER_LAUNCH_FAILED');
     const page = context.pages()[0] ?? await context.newPage();
-    if (options.url && !new URL(page.url()).hostname.endsWith('chatgpt.com')) {
+    const currentUrl = new URL(page.url());
+    const targetUrl = options.url ? new URL(options.url) : undefined;
+    const needsAppNavigation = targetUrl
+      && (currentUrl.hostname !== targetUrl.hostname || (currentUrl.pathname === '/' && targetUrl.pathname !== '/'));
+    if (options.url && needsAppNavigation) {
       await page.goto(options.url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     }
     return { browser, context, page };

@@ -14,8 +14,8 @@ export function listProviders(): ProviderInfo[] {
 export function createProvider(providerId: string, config: NovaConfig, projectRoot?: string): AIProvider {
   switch (providerId) {
     case 'chatgpt-web': return new ChatGPTWebProvider(config.browser.channel, config.browser.timeoutMs, projectRoot, config.protocol.maxResponseBytes);
-    case 'claude-web': return new ClaudeWebProvider();
-    case 'gemini-web': return new GeminiWebProvider();
+    case 'claude-web': return new ClaudeWebProvider(config.browser.channel, config.browser.timeoutMs, projectRoot, config.protocol.maxResponseBytes);
+    case 'gemini-web': return new GeminiWebProvider(config.browser.channel, config.browser.timeoutMs, projectRoot, config.protocol.maxResponseBytes);
     case 'mock': return new MockProvider();
     default: throw new Error(`Fournisseur inconnu : ${providerId}`);
   }

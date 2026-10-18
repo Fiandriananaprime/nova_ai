@@ -6,6 +6,7 @@ import { parseAIResponse } from '../../../protocol/parser.js';
 import { buildProviderMessage } from '../../../protocol/prompts.js';
 import { NovaError, asNovaError } from '../../../utils/errors.js';
 import { saveBrowserDiagnostic } from '../../../browser/diagnostics.js';
+import { CHATGPT_SELECTORS } from '../../../browser/selectors/chatgpt.js';
 
 export class ChatGPTWebProvider implements AIProvider {
   readonly id = 'chatgpt-web';
@@ -28,7 +29,7 @@ export class ChatGPTWebProvider implements AIProvider {
       if (!state.authenticated) throw new NovaError('Session ChatGPT non authentifiée. Connecte-toi manuellement dans Edge puis relance la tâche.', 'BROWSER_NOT_AUTHENTICATED');
       if (!state.usable) throw new NovaError(`${state.detail} Aucun message n’a été envoyé.`, 'BROWSER_SELECTOR_MISMATCH');
       const message = buildProviderMessage({ ...request, message: `${request.message}\n\nExchange number: ${++this.turn}` });
-      const raw = await sendAndReadLastAssistant(page, message, this.timeoutMs, this.maxResponseBytes);
+      const raw = await sendAndReadLastAssistant(page, message, CHATGPT_SELECTORS, this.timeoutMs, this.maxResponseBytes);
       this.restoredUrl = page.url();
       return parseAIResponse(raw);
     } catch (error) {
