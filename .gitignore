@@ -4,5 +4,6 @@ coverage/
 *.log
 .env
 .env.*
+.nova_agents
 !.env.example
 !.env.sample

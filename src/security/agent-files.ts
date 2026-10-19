@@ -2,7 +2,7 @@ import path from 'node:path';
 import { lstat, mkdir, realpath } from 'node:fs/promises';
 import { NovaError } from '../utils/errors.js';
 
-const AGENT_SUBDIRECTORIES = new Set(['patches', 'backups', 'sessions', 'diff', 'logs', 'history.git']);
+const AGENT_SUBDIRECTORIES = new Set(['patches', 'backups', 'sessions', 'diff', 'logs', 'output', 'history.git']);
 
 function agentPathParts(absolutePath: string): { root: string; parts: string[]; agentIndex: number } | undefined {
   const resolved = path.resolve(absolutePath);

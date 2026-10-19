@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { writeAtomic, readOptional } from '../utils/fs.js';
+import { pruneAgentFiles } from '../utils/retention.js';
 
 export type OperationStatus = 'PREPARED' | 'APPLIED' | 'REJECTED' | 'FAILED' | 'UNDONE';
 export interface OperationRecord {
@@ -65,5 +66,6 @@ export async function saveReport(projectRoot: string, record: OperationRecord): 
     record.reportPath = reportPath;
   }
   await writeAtomic(reportPath, renderReport(record));
+  await pruneAgentFiles(projectRoot, 'diff');
   return reportPath;
 }

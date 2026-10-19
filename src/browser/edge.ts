@@ -105,7 +105,7 @@ async function attachToEdge(options: { timeoutMs: number; url?: string }): Promi
     const currentUrl = new URL(page.url());
     const targetUrl = options.url ? new URL(options.url) : undefined;
     const needsAppNavigation = targetUrl
-      && (currentUrl.hostname !== targetUrl.hostname || (currentUrl.pathname === '/' && targetUrl.pathname !== '/'));
+      && (currentUrl.origin !== targetUrl.origin || currentUrl.pathname !== targetUrl.pathname);
     if (options.url && needsAppNavigation) {
       await page.goto(options.url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     }

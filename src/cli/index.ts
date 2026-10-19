@@ -15,6 +15,7 @@ import { resumeCommand } from './commands/resume.js';
 import { interactiveCommand } from './commands/interactive.js';
 import { steerCommand } from './commands/steer.js';
 import { NOVA_VERSION } from '../version.js';
+import { ensureProjectInitialized } from '../context/project-setup.js';
 import { NovaError, asNovaError } from '../utils/errors.js';
 import { isInteractive } from '../utils/fs.js';
 
@@ -29,8 +30,13 @@ program
 program.command('init')
   .description('Initialise Nova Agent dans un projet sans écraser les fichiers existants.')
   .argument('[project]', 'chemin du projet cible', '.')
-  .option('--add-gitignore', 'autoriser explicitement l’ajout de .nova_agents/ au .gitignore principal')
-  .action(async (project: string, options: { addGitignore?: boolean }) => initProject(project, options));
+  .action(async (project: string) => initProject(project));
+
+program.hook('preAction', async (_hookedCommand, actionCommand) => {
+  if (actionCommand.name() === 'init') return;
+  const options = actionCommand.optsWithGlobals() as { project?: string };
+  await ensureProjectInitialized(path.resolve(options.project ?? process.cwd()));
+});
 
 program.command('browser')
   .description('Ouvre ChatGPT dans un profil Microsoft Edge dédié et vérifie la session.')

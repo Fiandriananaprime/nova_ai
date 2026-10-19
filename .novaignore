@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+
+# Version control and agent internals
+.git/
+.nova_agents/
+
+# Build outputs
+dist/
+build/
+coverage/
+.next/
+.nuxt/
+.output/
+target/
+
+# Caches
+.cache/
+.parcel-cache/
+.turbo/
+
+# IDE and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Common credential files
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Large generated assets
+*.min.js
+*.map

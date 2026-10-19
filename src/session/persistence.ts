@@ -4,6 +4,7 @@ import { NovaError } from '../utils/errors.js';
 
 export type SessionStatus = 'IDLE' | 'ANALYZING_CONTEXT' | 'SENDING_PROMPT' | 'WAITING_FOR_RESPONSE' | 'PARSING_RESPONSE' | 'READING_FILES' | 'WAITING_FOR_USER' | 'VALIDATING_PATCH' | 'PREVIEWING_DIFF' | 'WAITING_FOR_APPROVAL' | 'APPLYING_PATCH' | 'RUNNING_TESTS' | 'RECORDING_HISTORY' | 'DONE' | 'ERROR' | 'PAUSED';
 export interface SessionExchange { at: string; state: string; detail: string; }
+export interface ApprovalPolicy { read: boolean; write: boolean; commands: boolean; }
 export interface PersistedSession {
   id: string;
   projectRoot: string;
@@ -31,6 +32,7 @@ export interface PersistedSession {
   fileTransferChunkIndex?: number;
   fileTransferChunkTotal?: number;
   fileTransferActive?: boolean;
+  fileTransferKind?: 'project-file' | 'command-output';
   fileTransferSummary?: string;
   /** Text of the request that may need a user-confirmed retry after an interruption. */
   pendingMessage?: string;
@@ -43,6 +45,7 @@ export interface PersistedSession {
   steeringCursor?: number;
   /** Steering guidance deferred until a one-by-one file transfer is complete. */
   pendingSteeringMessages?: string[];
+  approvalPolicy?: ApprovalPolicy;
   providerState?: string;
   pendingOperationId?: string;
   error?: string;

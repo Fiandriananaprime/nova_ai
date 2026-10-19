@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { Page } from 'playwright';
 import { writeAtomic, id } from '../utils/fs.js';
+import { pruneAgentFiles } from '../utils/retention.js';
 
 /** Diagnostic metadata only: no prompt, page body, cookies, local storage, or form values. */
 export async function saveBrowserDiagnostic(projectRoot: string | undefined, page: Page | undefined, code: string, detail: string): Promise<void> {
@@ -17,4 +18,5 @@ export async function saveBrowserDiagnostic(projectRoot: string | undefined, pag
     pageContent: 'not recorded',
   };
   await writeAtomic(file, `${JSON.stringify(record, null, 2)}\n`);
+  await pruneAgentFiles(projectRoot, 'logs');
 }

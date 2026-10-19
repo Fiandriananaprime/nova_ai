@@ -20,7 +20,7 @@ export async function approveOrReject(question: string): Promise<boolean> {
   while (true) {
     const answer = (await ask(`${question} Tape approve (tout le patch de cette session), approve all, ou reject : `)).trim().toLowerCase();
     if (answer === 'approve' || answer === 'approve all') return true;
-    if (answer === 'reject' || answer === 'rejected') return false;
+    if (answer === 'reject' || answer === 'rejected' || answer === 'rejecte') return false;
     console.log('Réponse invalide. Tape approve, approve all ou reject.');
   }
 }

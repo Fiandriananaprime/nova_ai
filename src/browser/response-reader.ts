@@ -4,7 +4,7 @@ import { findFirstVisible, findUsableComposer } from './page-inspector.js';
 import { NovaError } from '../utils/errors.js';
 import type { WebProviderSelectors } from './selectors/web-providers.js';
 
-const STATUSES = new Set(['NEED_FILES', 'FILE_RECEIVED', 'NEED_INFO', 'PATCH_READY', 'DONE']);
+const STATUSES = new Set(['NEED_FILES', 'FILE_RECEIVED', 'TRANSFER_STOP', 'NEED_INFO', 'RUN_COMMAND', 'PATCH_READY', 'DONE']);
 
 function extractProtocolResponse(text: string): string {
   let searchFrom = text.length;

@@ -24,12 +24,15 @@
 - Node.js + TypeScript strict, ESM, CLI Commander.
 - Profil Microsoft Edge dédié et persistant via Playwright ; aucune utilisation du profil personnel Edge.
 - Protocole commun `nova-agent/1`, validé par Zod.
-- États `NEED_FILES`, `FILE_RECEIVED`, `NEED_INFO`, `PATCH_READY` et `DONE`.
+- États `NEED_FILES`, `FILE_RECEIVED`, `TRANSFER_STOP`, `NEED_INFO`, `RUN_COMMAND`, `PATCH_READY` et `DONE`.
+- Exécution locale des commandes demandées par l’IA, avec approbation explicite et résultat transmis dans le cycle suivant.
+- Initialisation automatique de `.nova_agents/` et ajout de son exclusion au `.gitignore` lors de l’ouverture d’un projet avec Nova.
+- Chargement des fichiers `AGENTS.md` du projet dans le contexte IA et rétention maximale de 15 rapports de diff et 15 journaux.
 - Scanner de projet, arborescence déterministe et règles `.novaignore` indépendantes, en plus de `.gitignore`.
 - Exclusions des dépendances, builds, secrets courants, répertoire `.nova_agents` et liens symboliques.
 - Envoi des seuls fichiers explicitement demandés, SHA-256 et non-répétition de contenus inchangés.
 - Patchs unifiés contrôlés par `git apply --check`, contrôle des chemins, détection de fichiers obsolètes et blocage des écritures dans `.nova_agents`.
-- Confirmation obligatoire avant l'application interactive ; le mode non interactif n'applique pas de patch.
+- Confirmation obligatoire avant l'application interactive, sauf activation explicite de `/approve-write` ou `/approve-all` ; le mode non interactif n'applique pas de patch.
 - Sauvegarde exacte des fichiers touchés, commit auxiliaire indépendant, rapport Markdown et rollback avec vérification des empreintes.
 - Sessions persistées et reprise explicite.
 - Provider `mock` pour tester le protocole sans navigateur ni compte IA.
@@ -91,12 +94,12 @@ Sans argument, Nova ouvre une interface interactive dans le terminal avec son lo
 npm run dev -- init "D:\Project\MonProjet"
 ```
 
-Nova Agent crée `.novaignore` si le fichier est absent, crée `.nova_agents/`, génère `project-tree.txt`, un modèle `project-context.md` et la configuration locale. Les fichiers existants `.novaignore`, `config.json` et `project-context.md` ne sont pas écrasés.
+Au premier lancement de Nova dans un projet, il crée automatiquement `.nova_agents/`, ses sous-dossiers, la configuration et le modèle `project-context.md` si nécessaire, puis ajoute `.nova_agents/` au `.gitignore` sans écraser les règles déjà présentes. `.novaignore` est également créé s’il manque. Les fichiers existants ne sont pas remplacés. La commande `init` ajoute en plus l’arborescence et l’historique auxiliaire.
 
-Si un dépôt Git principal existe, Nova Agent ne le réinitialise pas et ne crée aucun commit dedans. L'ajout de `.nova_agents/` au `.gitignore` principal demande une confirmation. Tu peux également autoriser explicitement cette opération :
+Si un dépôt Git principal existe, Nova Agent ne le réinitialise pas et ne crée aucun commit dedans. L’exclusion `.nova_agents/` est ajoutée automatiquement au `.gitignore` principal.
 
 ```powershell
-npm run dev -- init "D:\Project\MonProjet" --add-gitignore
+npm run dev -- init "D:\Project\MonProjet"
 ```
 
 ### 2. Compléter le contexte
@@ -183,20 +186,24 @@ npm run dev -- context tree --project "D:\Project\MonProjet"
 
 ## Cycle de correction
 
-1. Le contexte initial comprend le `project-context.md` et le tree, tronqués si nécessaire par le budget local.
+1. Le contexte initial comprend le `project-context.md`, les fichiers `AGENTS.md` non ignorés du projet et le tree, tronqués si nécessaire par le budget local. Les instructions AGENTS sont suivies dans la mesure où elles respectent la demande utilisateur et le protocole Nova.
 2. Le prompt général et le protocole `nova-agent/1` sont ajoutés au premier message de la session seulement ; les messages suivants du même fournisseur s’appuient sur le fil existant et ne répètent que les consignes propres à l’échange.
-3. Le fournisseur répond par un unique objet JSON conforme au protocole `nova-agent/1`.
-4. Lors de `NEED_FILES`, chaque chemin est normalisé et contrôlé. Les fichiers sont découpés en segments de 300 lignes et 12 KiB maximum ; Nova attend un `FILE_RECEIVED` avec le chemin et l’index du segment avant d’envoyer la suite. Si un secret potentiel est détecté dans un fichier demandé, Nova demande `approve` ou `rejected` avant tout envoi ; l’accord est associé à l’empreinte exacte du fichier et sera redemandé si son contenu change. Les contenus inchangés ne sont pas renvoyés et un budget total de 4 MiB par demande limite la taille cumulée des fichiers transmis.
-5. Lors de `NEED_INFO`, la question est affichée dans le terminal et la réponse est enregistrée dans la session.
-6. Lors de `PATCH_READY`, Nova Agent valide les chemins, les règles d'exclusion, les SHA-256 des sources et l'applicabilité du patch avant de le conserver.
-7. Le résumé affiche une ligne par fichier avec les ajouts et suppressions ; le nom du fichier ouvre le rapport Markdown complet dans `.nova_agents/diff/`. L'utilisateur tape `approve` pour appliquer le patch ou `reject` pour le refuser. Aucune réponse de l'IA ne constitue une approbation.
-8. Après confirmation, les originaux sont sauvegardés, le patch est appliqué, les tests explicitement configurés sont lancés, l'historique auxiliaire est mis à jour et le rapport Markdown est enrichi.
-9. `undo` vérifie les empreintes post-application. Si un fichier a changé depuis, le rollback est refusé afin de préserver le travail externe.
+3. Le fournisseur répond par un unique objet JSON conforme au protocole `nova-agent/1`. Il peut demander une commande locale avec `RUN_COMMAND` ; Nova affiche la commande et son motif, puis attend `approve` ou `rejected`. `approve command` approuve les commandes suivantes de la session. La sortie bornée est renvoyée à l’IA, sauf si elle semble contenir un secret.
+4. Lors de `NEED_FILES`, chaque chemin est normalisé et contrôlé. Les fichiers sont découpés en segments de 300 lignes et 12 KiB maximum ; Nova attend un `FILE_RECEIVED` avant le segment suivant. L’IA peut envoyer `TRANSFER_STOP` avec le chemin et l’index courant pour annuler la suite dès qu’elle a assez de contenu. Les sorties longues des commandes approuvées sont enregistrées sous `.nova_agents/output` et transmises par les mêmes segments. Si un secret potentiel est détecté dans un fichier demandé, Nova demande `approve` ou `rejected` avant tout envoi ; l’accord est associé à l’empreinte exacte du fichier et sera redemandé si son contenu change. `/approve-read` autorise automatiquement les lectures demandées, y compris celles détectées comme contenant un secret. Les contenus inchangés ne sont pas renvoyés et un budget total de 4 MiB par demande limite la taille cumulée des fichiers transmis.
+5. Lors de `RUN_COMMAND`, Nova affiche la commande et son motif et demande `approve` ou `rejected`. `approve command` autorise les commandes restantes de la session. `/approve-command` les autorise sans confirmation pour les prochaines tâches de ce terminal ; `/approve-all` active aussi l’approbation automatique des lectures et écritures. Les commandes s’exécutent dans le dossier du projet avec un délai maximal de deux minutes ; leur sortie est tronquée et masquée si elle semble contenir un secret potentiel.
+6. Lors de `NEED_INFO`, la question est affichée dans le terminal et la réponse est enregistrée dans la session.
+7. Lors de `PATCH_READY`, Nova Agent valide les chemins, les règles d'exclusion, les SHA-256 des sources et l'applicabilité du patch avant de le conserver. `/approve-write` applique automatiquement les patchs validés ; `/approve-none` désactive les autorisations automatiques.
+8. Le résumé affiche une ligne par fichier avec les ajouts et suppressions ; le nom du fichier ouvre le rapport Markdown complet dans `.nova_agents/diff/`. L'utilisateur tape `approve` pour appliquer le patch ou `reject` pour le refuser. Aucune réponse de l'IA ne constitue une approbation.
+9. Après confirmation, les originaux sont sauvegardés, le patch est appliqué, les tests explicitement configurés sont lancés, l'historique auxiliaire est mis à jour et le rapport Markdown est enrichi.
+10. `undo` vérifie les empreintes post-application. Si un fichier a changé depuis, le rollback est refusé afin de préserver le travail externe.
+
+Les rapports Markdown dans `.nova_agents/diff/` et les journaux dans `.nova_agents/logs/` sont limités chacun aux 15 fichiers les plus récents. Les anciens fichiers excédentaires sont supprimés automatiquement ; les métadonnées d’opérations restent dans l’historique.
 
 ### États de réponse de l'IA
 
 ```text
-NEED_FILES  -> lecture contrôlée -> envoi un par un -> FILE_RECEIVED -> analyse
+NEED_FILES  -> lecture contrôlée -> envoi un par un -> FILE_RECEIVED ou TRANSFER_STOP -> analyse
+RUN_COMMAND -> approbation utilisateur -> exécution locale -> résultat -> analyse
 NEED_INFO   -> question utilisateur -> nouvel échange
 PATCH_READY -> validation -> diff -> approbation -> application
 DONE        -> fin sans patch

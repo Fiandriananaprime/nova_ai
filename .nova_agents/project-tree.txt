@@ -26,7 +26,8 @@ nova-agent/
 │   │   └── registry.ts
 │   ├── browser/
 │   │   ├── selectors/
-│   │   │   └── chatgpt.ts
+│   │   │   ├── chatgpt.ts
+│   │   │   └── web-providers.ts
 │   │   ├── diagnostics.ts
 │   │   ├── edge.ts
 │   │   ├── page-inspector.ts
@@ -41,12 +42,16 @@ nova-agent/
 │   │   │   ├── fix.ts
 │   │   │   ├── history.ts
 │   │   │   ├── init.ts
+│   │   │   ├── interactive.ts
 │   │   │   ├── model.ts
 │   │   │   ├── resume.ts
 │   │   │   ├── status.ts
+│   │   │   ├── steer.ts
 │   │   │   └── undo.ts
 │   │   ├── index.ts
-│   │   └── prompts.ts
+│   │   ├── patch-preview.ts
+│   │   ├── prompts.ts
+│   │   └── terminal-ui.ts
 │   ├── config/
 │   │   ├── loader.ts
 │   │   └── schema.ts
@@ -54,6 +59,7 @@ nova-agent/
 │   │   ├── descriptions.ts
 │   │   ├── file-reader.ts
 │   │   ├── ignore.ts
+│   │   ├── project-setup.ts
 │   │   ├── scanner.ts
 │   │   ├── token-budget.ts
 │   │   └── tree.ts
@@ -79,12 +85,16 @@ nova-agent/
 │   │   ├── paths.ts
 │   │   └── permissions.ts
 │   ├── session/
+│   │   ├── command-executor.ts
 │   │   ├── orchestrator.ts
 │   │   ├── persistence.ts
-│   │   └── state-machine.ts
-│   └── utils/
-│       ├── errors.ts
-│       └── fs.ts
+│   │   ├── state-machine.ts
+│   │   └── steering.ts
+│   ├── utils/
+│   │   ├── errors.ts
+│   │   ├── fs.ts
+│   │   └── retention.ts
+│   └── version.ts
 ├── tests/
 │   ├── agent-files.test.ts
 │   ├── context.test.ts
@@ -95,6 +105,7 @@ nova-agent/
 │   ├── security.test.ts
 │   └── session-persistence.test.ts
 ├── .gitignore
+├── .novaignore
 ├── .npmrc
 ├── LICENSE
 ├── package-lock.json

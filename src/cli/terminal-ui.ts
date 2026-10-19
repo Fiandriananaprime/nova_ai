@@ -4,13 +4,21 @@ import { stdout } from 'node:process';
 import { NOVA_VERSION } from '../version.js';
 
 const ansiEnabled = Boolean(stdout.isTTY && !process.env.NO_COLOR);
-const HEADER_ROWS = 9;
+const FULL_HEADER_ROWS = 9;
 
 function color(value: string, code: number): string {
   return ansiEnabled ? `\u001b[${code}m${value}\u001b[0m` : value;
 }
 
 function headerLines(projectRoot: string): string[] {
+  const compactWidth = Math.max(24, (stdout.columns ?? 80) - 2);
+  const compactPath = Array.from(projectRoot).length > compactWidth ? `…${Array.from(projectRoot).slice(-(compactWidth - 1)).join('')}` : projectRoot;
+  if ((stdout.rows ?? 0) < FULL_HEADER_ROWS + 4) {
+    return [
+      `${color('NOVA', 1)} ${color(`v${NOVA_VERSION}`, 90)} ${color('local coding agent', 90)}`,
+      color(compactPath, 90),
+    ];
+  }
   const logo = [
     '███╗   ██╗ ██████╗ ██╗   ██╗ █████╗',
     '████╗  ██║██╔═══██╗██║   ██║██╔══██╗',
@@ -30,7 +38,7 @@ function headerLines(projectRoot: string): string[] {
 }
 
 export function renderBrand(projectRoot: string): void {
-  if (!stdout.isTTY || process.env.TERM === 'dumb' || !stdout.rows || stdout.rows < HEADER_ROWS + 4) {
+  if (!stdout.isTTY || process.env.TERM === 'dumb' || !stdout.rows || stdout.rows < 5) {
     console.log(headerLines(projectRoot).join('\n'));
     return;
   }
@@ -40,10 +48,11 @@ export function renderBrand(projectRoot: string): void {
     if (!clearBody) stdout.write('\u001b[s');
     stdout.write('\u001b[r');
     rows.forEach((line, index) => stdout.write(`\u001b[${index + 1};1H\u001b[2K${line}`));
-    for (let row = rows.length + 1; row <= HEADER_ROWS; row += 1) stdout.write(`\u001b[${row};1H\u001b[2K`);
-    if (clearBody) stdout.write(`\u001b[${HEADER_ROWS + 1};1H\u001b[J`);
-    stdout.write(`\u001b[${HEADER_ROWS + 1};${stdout.rows}r`);
-    stdout.write(clearBody ? `\u001b[${HEADER_ROWS + 1};1H` : '\u001b[u');
+    const lastHeaderRow = Math.min(FULL_HEADER_ROWS, (stdout.rows ?? FULL_HEADER_ROWS + 1) - 1);
+    for (let row = rows.length + 1; row <= lastHeaderRow; row += 1) stdout.write(`\u001b[${row};1H\u001b[2K`);
+    if (clearBody) stdout.write(`\u001b[${rows.length + 1};1H\u001b[J`);
+    stdout.write(`\u001b[${rows.length + 1};${stdout.rows}r`);
+    stdout.write(clearBody ? `\u001b[${rows.length + 1};1H` : '\u001b[u');
   };
 
   drawHeader(true);
