@@ -150,7 +150,7 @@ async function readRequestedFile(
 
 const MAX_LINES_PER_FILE_CHUNK = 300;
 const MAX_BYTES_PER_FILE_CHUNK = 12 * 1024;
-const MAX_PROTOCOL_REPAIR_ATTEMPTS = 2;
+const MAX_RESPONSE_REPAIR_ATTEMPTS = 2;
 const REPAIRABLE_RESPONSE_CODES = new Set([
   'AI_JSON_INVALID', 'AI_PROTOCOL_INVALID',
   'PATCH_APPLY_CHECK_FAILED', 'PATCH_HUNK_INVALID', 'PATCH_FORMAT_INVALID', 'PATCH_HEADER_INVALID',
@@ -406,14 +406,14 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
             break;
           } catch (error) {
             const issue = asNovaError(error);
-            if (!REPAIRABLE_RESPONSE_CODES.has(issue.code) || attempt >= MAX_PROTOCOL_REPAIR_ATTEMPTS) throw issue;
+            if (!REPAIRABLE_RESPONSE_CODES.has(issue.code) || attempt >= MAX_RESPONSE_REPAIR_ATTEMPTS) throw issue;
             attempt += 1;
             logger.record('orchestrator.response.repair_requested', { attempt, rejectedMessageId: repairRequest.messageId, code: issue.code, message: issue.message, stack: issue.stack });
-            renderStatus('PROTOCOL_REPAIR', `RÃ©ponse invalide, correction demandÃ©e (${attempt}/${MAX_PROTOCOL_REPAIR_ATTEMPTS})`);
+            renderStatus('PROTOCOL_REPAIR', `RÃ©ponse invalide, correction demandÃ©e (${attempt}/${MAX_RESPONSE_REPAIR_ATTEMPTS})`);
             const correctedRequest = {
               ...request,
               messageId: randomUUID(),
-              message: `Nova a rejetÃ© ta rÃ©ponse prÃ©cÃ©dente pour cette mÃªme requÃªte. Erreur de validation (${issue.code}) : ${issue.message}\n\nCorrige immÃ©diatement ta rÃ©ponse en renvoyant un seul objet JSON valide conforme Ã  nova-agent/1. Utilise le messageId du paquet de correction courant. Ne recommence pas l'analyse et ne redemande pas les fichiers dÃ©jÃ  reÃ§us ; corrige uniquement la forme ou les champs signalÃ©s.`,
+              message: `Nova a rejeté ta réponse précédente pour cette même requête. Erreur de validation (${issue.code}) : ${issue.message}\n\n${issue.code.startsWith('PATCH_') ? 'Le patch PATCH_READY précédent a été rejeté par le validateur Git. Renvoye un objet JSON complet avec status PATCH_READY et un diff unifié complet. Recalcule chaque compteur @@ à partir des lignes réellement présentes ; chaque ligne du corps doit commencer par un espace, - ou +. Ne change pas l’objectif du patch, ne mets pas de Markdown, n’envoie pas de fragment et ne redemande pas les fichiers déjà reçus.' : 'Corrige immédiatement la réponse en renvoyant un seul objet JSON valide conforme à nova-agent/1. Utilise le messageId du paquet de correction courant ; ne recommence pas l’analyse et ne redemande pas les fichiers déjà reçus.'}`,
               projectContext: '',
               includeGeneralPrompt: false,
               forceInitialPrompt: false,
