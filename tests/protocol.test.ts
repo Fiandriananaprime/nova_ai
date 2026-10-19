@@ -11,6 +11,12 @@ describe('protocol parser', () => {
     expect(parseAIResponse(JSON.stringify({ protocol, acknowledgedMessageId: 'msg-1', status: 'DONE', reason: 'No changes needed.' })).status).toBe('DONE');
   });
 
+  it('allows TRANSFER_STOP metadata recovery only as a standalone status', () => {
+    const stop = parseAIResponse(JSON.stringify({ protocol, acknowledgedMessageId: 'msg-1', status: 'TRANSFER_STOP', transferReason: 'Enough information.' }));
+    expect(stop.status).toBe('TRANSFER_STOP');
+    expect(() => parseAIResponse(JSON.stringify({ protocol, acknowledgedMessageId: 'msg-1', status: 'FILE_RECEIVED', nextStatus: 'TRANSFER_STOP' }))).toThrow(/FILE_RECEIVED exige receivedFile et chunkIndex/);
+  });
+
   it('accepts one fenced JSON object, but not extra prose', () => {
     expect(parseAIResponse('```json\n{"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"DONE"}\n```').status).toBe('DONE');
     expect(() => parseAIResponse('Here is the answer: {"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"DONE"}')).toThrow();
@@ -52,6 +58,8 @@ describe('provider prompt construction', () => {
     expect(prompt).toContain('PATCH_READY patch must be a complete, syntactically valid unified Git diff');
     expect(prompt).toContain('oldCount equals context lines plus removed lines');
     expect(prompt).toContain('do not turn them into \\<, \\>, or \\*');
+    expect(prompt).toContain('Never emit a standalone TRANSFER_STOP for a delivered segment');
+    expect(prompt).toContain('exact receivedFile and chunkIndex');
   });
 });
 
