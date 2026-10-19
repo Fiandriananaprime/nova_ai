@@ -24,19 +24,19 @@ export class ChatGPTWebProvider implements AIProvider {
     if (!this.session) this.session = new EdgeSession(this.channel, this.timeoutMs);
     let page;
     try {
-      request.onTrace?.('provider.send.start', { providerId: this.id, taskId: request.taskId, messageId: request.messageId, userMessage: request.message, fileMetadata: request.files?.map(({ path, sha256, content }) => ({ path, sha256, bytes: Buffer.byteLength(content, 'utf8') })) ?? [] });
+      request.onTrace?.('provider.send.start', { providerId: this.id, taskId: request.taskId, messageId: request.messageId, userMessageBytes: Buffer.byteLength(request.message, 'utf8'), fileMetadata: request.files?.map(({ path, sha256, content }) => ({ path, sha256, bytes: Buffer.byteLength(content, 'utf8') })) ?? [] });
       page = this.session.currentPage ?? await this.session.openChatGPT(this.restoredUrl ?? 'https://chatgpt.com/');
       const state = await inspectChatGPTPage(page);
       if (!state.authenticated) throw new NovaError('Session ChatGPT non authentifiée. Connecte-toi manuellement dans Edge puis relance la tâche.', 'BROWSER_NOT_AUTHENTICATED');
       if (!state.usable) throw new NovaError(`${state.detail} Aucun message n’a été envoyé.`, 'BROWSER_SELECTOR_MISMATCH');
       const newConversation = isNewProviderConversation(this.restoredUrl, page.url(), 'chatgpt.com');
       const message = buildProviderMessage({ ...request, forceInitialPrompt: request.forceInitialPrompt || newConversation, message: `${request.message}\n\nExchange number: ${++this.turn}` });
-      request.onTrace?.('provider.prompt.prepared', { messageId: request.messageId, conversationUrl: page.url(), includeGeneralPrompt: request.forceInitialPrompt || request.includeGeneralPrompt !== false, promptBytes: Buffer.byteLength(message, 'utf8'), prompt: message, projectContextBytes: Buffer.byteLength(request.projectContext, 'utf8'), treeBytes: Buffer.byteLength(request.tree ?? '', 'utf8') });
+      request.onTrace?.('provider.prompt.prepared', { messageId: request.messageId, conversationUrl: page.url(), includeGeneralPrompt: request.forceInitialPrompt || request.includeGeneralPrompt !== false, promptBytes: Buffer.byteLength(message, 'utf8'), projectContextBytes: Buffer.byteLength(request.projectContext, 'utf8'), treeBytes: Buffer.byteLength(request.tree ?? '', 'utf8') });
       const raw = await sendAndReadLastAssistant(page, message, request.messageId, CHATGPT_SELECTORS, this.timeoutMs, this.maxResponseBytes, request.signal, request.onTrace);
-      request.onTrace?.('provider.response.raw', { messageId: request.messageId, response: raw });
+      request.onTrace?.('provider.response.raw', { messageId: request.messageId, responseBytes: Buffer.byteLength(raw, 'utf8') });
       this.restoredUrl = page.url();
       const response = parseAIResponse(raw, request.messageId);
-      request.onTrace?.('provider.response.parsed', { messageId: request.messageId, response });
+      request.onTrace?.('provider.response.parsed', { messageId: request.messageId, status: response.status, responseBytes: Buffer.byteLength(raw, 'utf8') });
       return response;
     } catch (error) {
       const issue = asNovaError(error);
