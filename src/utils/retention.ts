@@ -3,7 +3,8 @@ import path from 'node:path';
 import { assertSafeAgentDirectory, assertSafeAgentPath } from '../security/agent-files.js';
 import { NovaError } from './errors.js';
 
-const MAX_FILES_PER_DIRECTORY = 15;
+const MAX_FILES_PER_DIRECTORY = 10;
+const MAX_LOG_DIRECTORY_BYTES = 5 * 1024 * 1024;
 type RetainedDirectory = 'diff' | 'logs' | 'output';
 
 export async function pruneAgentFiles(projectRoot: string, directory: RetainedDirectory): Promise<string[]> {
@@ -15,7 +16,7 @@ export async function pruneAgentFiles(projectRoot: string, directory: RetainedDi
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
-  const files: Array<{ path: string; modifiedAt: number }> = [];
+  const files: Array<{ path: string; modifiedAt: number; size: number }> = [];
   for (const name of names) {
     const filePath = path.join(absoluteDirectory, name);
     await assertSafeAgentPath(filePath);
@@ -25,21 +26,26 @@ export async function pruneAgentFiles(projectRoot: string, directory: RetainedDi
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
       throw error;
     }
-    if (info.isFile()) files.push({ path: filePath, modifiedAt: info.mtimeMs });
+    if (info.isFile()) files.push({ path: filePath, modifiedAt: info.mtimeMs, size: info.size });
   }
   files.sort((left, right) => left.modifiedAt - right.modifiedAt || left.path.localeCompare(right.path));
-  const excess = files.length - MAX_FILES_PER_DIRECTORY;
-  if (excess <= 0) return [];
+  let totalBytes = files.reduce((total, file) => total + file.size, 0);
+  let remainingFiles = files.length;
   const removed: string[] = [];
-  for (const file of files.slice(0, excess)) {
+  for (const file of files) {
+    const overFileLimit = remainingFiles > MAX_FILES_PER_DIRECTORY;
+    const overLogByteLimit = directory === 'logs' && totalBytes > MAX_LOG_DIRECTORY_BYTES;
+    if (!overFileLimit && !overLogByteLimit) break;
     try {
       await unlink(file.path);
-      removed.push(path.relative(projectRoot, file.path));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw new NovaError(`Impossible de supprimer l’ancien fichier Nova ${file.path} : ${error instanceof Error ? error.message : String(error)}`, 'AGENT_RETENTION_FAILED');
       }
     }
+    removed.push(path.relative(projectRoot, file.path));
+    remainingFiles -= 1;
+    totalBytes = Math.max(0, totalBytes - file.size);
   }
   return removed;
 }
