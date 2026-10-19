@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { readJson, writeJson } from '../utils/fs.js';
 import { NovaError } from '../utils/errors.js';
+import { recordCurrentSessionLog } from './session-logger.js';
 
 export type SessionStatus = 'IDLE' | 'ANALYZING_CONTEXT' | 'SENDING_PROMPT' | 'WAITING_FOR_RESPONSE' | 'PARSING_RESPONSE' | 'READING_FILES' | 'WAITING_FOR_USER' | 'VALIDATING_PATCH' | 'PREVIEWING_DIFF' | 'WAITING_FOR_APPROVAL' | 'APPLYING_PATCH' | 'RUNNING_TESTS' | 'RECORDING_HISTORY' | 'DONE' | 'ERROR' | 'PAUSED';
 export interface SessionExchange { at: string; state: string; detail: string; }
@@ -58,8 +59,10 @@ export function sessionPath(projectRoot: string, sessionId: string): string {
 
 export async function saveSession(session: PersistedSession): Promise<void> {
   session.updatedAt = new Date().toISOString();
+  recordCurrentSessionLog('session.persist.start', { state: session.state, cycle: session.cycle });
   await writeJson(sessionPath(session.projectRoot, session.id), session);
   await writeJson(path.join(session.projectRoot, '.nova_agents', 'session.json'), { currentSessionId: session.id, updatedAt: session.updatedAt });
+  recordCurrentSessionLog('session.persist.complete', { state: session.state, cycle: session.cycle });
 }
 
 export async function loadSession(projectRoot: string, sessionId: string): Promise<PersistedSession> {

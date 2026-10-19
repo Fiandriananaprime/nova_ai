@@ -91,16 +91,35 @@ async function readPageText(page: Page, timeout?: number): Promise<string> {
   return page.locator('body').innerText(timeout ? { timeout } : undefined).catch(() => '');
 }
 
+async function readPageAssistantText(page: Page, selectors: WebProviderSelectors): Promise<string> {
+  const userSelectors = selectors.userMessage
+    ? Array.isArray(selectors.userMessage) ? selectors.userMessage : [selectors.userMessage]
+    : [];
+  if (!userSelectors.length) return '';
+  for (const selector of ['main', 'body']) {
+    const text = await page.locator(selector).evaluate((element, excludedSelectors) => {
+      const copy = element.cloneNode(true) as HTMLElement;
+      for (const excludedSelector of excludedSelectors) {
+        copy.querySelectorAll(excludedSelector).forEach((node) => node.remove());
+      }
+      return copy.innerText;
+    }, userSelectors).catch(() => '');
+    if (text.trim()) return text;
+  }
+  return '';
+}
+
 /**
- * Text sources that may hold the reply, most specific first: the new assistant nodes,
- * the newest assistant node (covers virtualised chat lists whose count does not grow),
- * then the whole conversation area. The caller searches each one for the protocol object,
- * so a "thinking" node or a reply rendered outside the assistant selector no longer hides it.
+ * Read newly added assistant nodes, then the latest assistant node (for virtualised chat
+ * lists), then a page-text fallback with user-message nodes removed. The fallback preserves
+ * support for providers whose assistant selector misses the rendered reply without allowing
+ * Nova's own prompt and its protocol examples to be mistaken for that reply.
  */
 async function readResponseCandidates(
   page: Page,
   assistant: Locator | undefined,
   beforeAssistantCount: number,
+  selectors: WebProviderSelectors,
 ): Promise<string[]> {
   const candidates: string[] = [];
   if (assistant) {
@@ -118,7 +137,7 @@ async function readResponseCandidates(
       if (latest.trim()) candidates.push(latest);
     }
   }
-  const pageText = await readPageText(page, 1000);
+  const pageText = await readPageAssistantText(page, selectors);
   if (pageText.trim()) candidates.push(pageText);
   return candidates;
 }
@@ -131,10 +150,17 @@ export async function sendAndReadLastAssistant(
   timeoutMs = 120000,
   maxResponseBytes = 2 * 1024 * 1024,
   signal?: AbortSignal,
+  onTrace?: (stage: string, details?: Record<string, unknown>) => void,
 ): Promise<string> {
+  const trace = (stage: string, details: Record<string, unknown> = {}): void => {
+    try { onTrace?.(stage, details); }
+    catch (error) { console.error(`Échec du trace Nova (${stage}) : ${error instanceof Error ? error.message : String(error)}`); }
+  };
+  trace('browser.request.start', { expectedMessageId, url: page.url(), messageBytes: Buffer.byteLength(message, 'utf8') });
   await throwIfAborted(page, selectors, signal);
   let composer = await findUsableComposer(page, selectors.composer, 15000);
   if (!composer) throw new NovaError('Champ de saisie du fournisseur introuvable.', 'BROWSER_SELECTOR_MISMATCH');
+  trace('browser.composer.ready');
 
   // A resumed session may reconnect while the provider is still answering the
   // previous request. Drain that generation before taking the response baseline.
@@ -146,6 +172,7 @@ export async function sendAndReadLastAssistant(
     }
     await page.waitForTimeout(500);
   }
+  trace('browser.previous_generation.finished');
 
   const assistant = selectors.assistantMessage ? page.locator(selectors.assistantMessage) : undefined;
   const beforeAssistantCount = assistant ? await assistant.count() : 0;
@@ -170,10 +197,12 @@ export async function sendAndReadLastAssistant(
     }
   }
   if (!filled) throw new NovaError('Le champ de saisie a changé pendant son activation. Aucun message envoyé.', 'BROWSER_SELECTOR_MISMATCH');
+  trace('browser.message.filled', { expectedMessageId, messageBytes: Buffer.byteLength(message, 'utf8') });
   let submitted = false;
   let lastSendError: unknown;
   for (let attempt = 1; attempt <= 3 && !submitted; attempt += 1) {
     await throwIfAborted(page, selectors, signal);
+    trace('browser.message.submit_attempt', { expectedMessageId, attempt });
     try {
       const send = await findFirstVisible(page, selectors.sendButton);
       if (send) await send.click({ timeout: 10000 });
@@ -231,6 +260,7 @@ export async function sendAndReadLastAssistant(
   if (!messageSent) {
     throw new NovaError('Le fournisseur n’a pas confirmé l’envoi : le champ contient encore le message et aucune génération n’a commencé.', 'BROWSER_SEND_FAILED');
   }
+  trace('browser.message.confirmed', { expectedMessageId });
 
   // The timeout is an inactivity limit: it restarts while the provider is generating or the page is
   // still changing, so long answers are not cut off. A hard cap still bounds the total wait.
@@ -247,7 +277,7 @@ export async function sendAndReadLastAssistant(
 
   while (Date.now() < hardDeadline && Date.now() - lastActivity < timeoutMs) {
     await throwIfAborted(page, selectors, signal);
-    const candidates = await readResponseCandidates(page, assistant, beforeAssistantCount);
+    const candidates = await readResponseCandidates(page, assistant, beforeAssistantCount, selectors);
     const latestAssistantText = assistant
       ? await assistant.last().innerText({ timeout: 1000 }).catch(() => '')
       : '';
@@ -301,6 +331,7 @@ export async function sendAndReadLastAssistant(
       if (Buffer.byteLength(text, 'utf8') > maxResponseBytes) {
         throw new NovaError(`Réponse du fournisseur trop volumineuse (limite ${maxResponseBytes} octets).`, 'AI_RESPONSE_TOO_LARGE');
       }
+      trace('browser.assistant.protocol_selected', { expectedMessageId, response: text, stableCount, stopVisible: stop });
       return text;
     }
 
@@ -319,7 +350,9 @@ export async function sendAndReadLastAssistant(
     if (unacknowledgedMessageId) {
       throw new NovaError(`Accuse de message invalide : Nova attendait ${expectedMessageId}, mais le fournisseur a repondu pour ${unacknowledgedMessageId}.`, 'AI_MESSAGE_ACK_INVALID');
     }
+    trace('browser.assistant.response_missing', { expectedMessageId, unacknowledgedMessageId });
     throw new NovaError('Le message a été envoyé, mais aucune nouvelle réponse détectable n’est apparue. Vérifie Edge avant toute nouvelle tentative.', 'BROWSER_RESPONSE_TIMEOUT');
   }
+  trace('browser.assistant.response_truncated', { expectedMessageId, previousResponse: previous });
   throw new NovaError('La réponse ChatGPT semble tronquée ou la génération n’a pas pris fin.', 'BROWSER_RESPONSE_TRUNCATED');
 }

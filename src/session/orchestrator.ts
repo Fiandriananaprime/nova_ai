@@ -8,7 +8,7 @@ import { readProjectFile } from '../context/file-reader.js';
 import { readOptional, id } from '../utils/fs.js';
 import { NovaError, asNovaError } from '../utils/errors.js';
 import { validateRequestedFiles } from '../protocol/validator.js';
-import type { AIProvider, AIResponse } from '../protocol/schema.js';
+import type { AIProvider, AIRequest, AIResponse } from '../protocol/schema.js';
 import { validatePatch } from '../patches/validator.js';
 import { applyOperation } from '../history/operation-service.js';
 import { saveReport, type OperationRecord } from '../history/markdown-reports.js';
@@ -32,6 +32,7 @@ import { loadIgnoreRules, isIgnored } from '../context/ignore.js';
 import { assertSafeAgentPath, resolveAgentStorePath } from '../security/agent-files.js';
 import { pruneAgentFiles } from '../utils/retention.js';
 import { emitNovaEvent, getNovaCoreCallbacks, requestNovaApproval, requestNovaAnswer, withNovaCoreCallbacks, type NovaCoreCallbacks } from './events.js';
+import { SessionLogger, recordCurrentSessionLog, withSessionLogger } from './session-logger.js';
 
 export interface FixOptions {
   projectRoot: string;
@@ -86,6 +87,7 @@ function transition(session: PersistedSession, state: PersistedSession['state'],
   session.state = state;
   const at = new Date().toISOString();
   session.exchanges.push({ at, state, detail: detail.slice(0, 3000) });
+  recordCurrentSessionLog('session.state', { state, detail: detail.slice(0, 3000), cycle: session.cycle });
   emitNovaEvent({ type: 'status', sessionId: session.id, state, detail: detail.slice(0, 3000), at });
   emitNovaEvent({ type: 'session', session: structuredClone(session) });
 }
@@ -252,6 +254,15 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
     contextSent: false,
     generalPromptSent: false,
   };
+  const logger = new SessionLogger(projectRoot, session.id);
+  return withSessionLogger(logger, async () => {
+  const messageIds: string[] = [];
+  logger.record('session.start', {
+    task: session.problem,
+    providerId: session.providerId,
+    resumed: Boolean(options.resumeSession),
+    providerConversationUrl: session.providerState,
+  });
   if (options.providerId && options.providerId !== session.providerId) {
     session.providerId = options.providerId;
     delete session.providerState;
@@ -315,7 +326,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       session.cycle += 1;
       transition(session, 'SENDING_PROMPT', `Envoi de l’échange ${session.cycle} au fournisseur ${session.providerId}.`);
       await saveSession(session);
-      const request = {
+      const request: AIRequest = {
         taskId: session.id,
         messageId: randomUUID(),
         message: nextMessage,
@@ -325,8 +336,21 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         ...(outgoingFiles.length ? { files: outgoingFiles } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.forceInitialPrompt && session.cycle === 1 ? { forceInitialPrompt: true } : {}),
+        onTrace: (stage, details = {}) => logger.record(stage, details),
       };
+      messageIds.push(request.messageId);
       const deliveredFiles = request.files ?? [];
+      logger.record('orchestrator.request.prepared', {
+        cycle: session.cycle,
+        taskId: request.taskId,
+        messageId: request.messageId,
+        message: request.message,
+        messageIds: [...messageIds],
+        includeGeneralPrompt: request.includeGeneralPrompt,
+        projectContextBytes: Buffer.byteLength(request.projectContext, 'utf8'),
+        treeBytes: Buffer.byteLength(request.tree ?? '', 'utf8'),
+        files: deliveredFiles.map(({ path: filePath, sha256, content }) => ({ path: filePath, sha256, bytes: Buffer.byteLength(content, 'utf8') })),
+      });
       session.pendingMessage = nextMessage;
       session.pendingFilePaths = outgoingFiles.map((file) => file.path);
       session.generalPromptSent = true;
@@ -349,23 +373,34 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       const stopThinking = startThinking();
       const stopSteeringCapture = captureInteractiveSteering(projectRoot, session.id);
       let response: AIResponse;
+      let responseMessageId = request.messageId;
       try {
         let attempt = 0;
         let repairRequest = request;
         while (true) {
           try {
             response = await provider.send(repairRequest);
+            logger.record('orchestrator.response.received', { cycle: session.cycle, messageId: repairRequest.messageId, messageIds: [...messageIds], response });
             // Validate PATCH_READY before leaving the repair loop. JSON validity
             // alone does not guarantee that the patch field contains a git diff.
             if (response.status === 'PATCH_READY'
               || response.status === 'FILE_RECEIVED' && response.nextStatus === 'PATCH_READY') {
-              await validatePatch(projectRoot, response.patch!, session.fileHashes, config.patches.maxPatchBytes);
+              logger.record('patch.validation.start', { messageId: repairRequest.messageId, responseStatus: response.status, nextStatus: response.nextStatus, patchBytes: Buffer.byteLength(response.patch!, 'utf8') });
+              try {
+                const prepared = await validatePatch(projectRoot, response.patch!, session.fileHashes, config.patches.maxPatchBytes);
+                logger.record('patch.validation.ok', { messageId: repairRequest.messageId, files: prepared.files.map((file) => file.path) });
+              } catch (error) {
+                const issue = asNovaError(error);
+                logger.record('patch.validation.error', { messageId: repairRequest.messageId, responseStatus: response.status, nextStatus: response.nextStatus, code: issue.code, message: issue.message, stack: issue.stack, patch: response.patch });
+                throw error;
+              }
             }
             break;
           } catch (error) {
             const issue = asNovaError(error);
             if (!REPAIRABLE_RESPONSE_CODES.has(issue.code) || attempt >= MAX_PROTOCOL_REPAIR_ATTEMPTS) throw issue;
             attempt += 1;
+            logger.record('orchestrator.response.repair_requested', { attempt, rejectedMessageId: repairRequest.messageId, code: issue.code, message: issue.message, stack: issue.stack });
             renderStatus('PROTOCOL_REPAIR', `RÃ©ponse invalide, correction demandÃ©e (${attempt}/${MAX_PROTOCOL_REPAIR_ATTEMPTS})`);
             const correctedRequest = {
               ...request,
@@ -375,6 +410,9 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
               includeGeneralPrompt: false,
               forceInitialPrompt: false,
             };
+            messageIds.push(correctedRequest.messageId);
+            responseMessageId = correctedRequest.messageId;
+            logger.record('orchestrator.repair.message', { attempt, messageId: correctedRequest.messageId, message: correctedRequest.message, messageIds: [...messageIds] });
             delete correctedRequest.files;
             delete correctedRequest.tree;
             repairRequest = correctedRequest;
@@ -559,11 +597,13 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       if (response.status === 'TRANSFER_STOP') throw new NovaError('Arrêt de transfert reçu sans transfert actif.', 'FILE_TRANSFER_ACK_UNEXPECTED');
 
       if (response.status === 'RUN_COMMAND') {
+        logger.record('command.requested', { messageId: responseMessageId, command: response.command, reason: response.commandReason });
         transition(session, 'WAITING_FOR_APPROVAL', 'Une commande demandée par l’IA attend une autorisation utilisateur.');
         await saveSession(session);
         const command = response.command!;
         emitNovaEvent({ type: 'activity', sessionId: session.id, text: `Running ${command}` });
         const outcome = await executeRequestedCommand(command, response.commandReason ?? '', session);
+        logger.record('command.completed', { command, approved: outcome.approved, exitCode: outcome.exitCode, stdout: outcome.stdout, stderr: outcome.stderr });
         const commandMetadata = formatCommandResult(command, { ...outcome, stdout: '', stderr: '' });
         const commandText = `${commandMetadata}\n\nstdout:\n${outcome.stdout || '(vide)'}\nstderr:\n${outcome.stderr || '(vide)'}`;
         const outputChunks = splitFileIntoChunks(commandText);
@@ -607,6 +647,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
 
       if (response.status === 'NEED_INFO') {
         const question = response.question!;
+        logger.record('user.question', { messageId: responseMessageId, question });
         renderStatus('NEED_INFO');
         transition(session, 'WAITING_FOR_USER', question);
         await saveSession(session);
@@ -625,6 +666,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           await saveSession(session);
           return session;
         }
+        logger.record('user.answer', { answer });
         session.answers.push(answer);
         nextMessage = `Réponse de l’utilisateur à la question précédente : ${answer}\nPoursuis la tâche en respectant le protocole JSON nova-agent/1. Ne considère pas cette réponse comme une approbation d’un patch.`;
         await saveSession(session);
@@ -633,6 +675,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
 
       if (response.status === 'NEED_FILES') {
         const requested = validateRequestedFiles(response, config.protocol.maxFilesPerRequest);
+        logger.record('files.requested', { messageId: responseMessageId, requested, reason: response.reason, summary: response.summary });
         renderStatus('NEED_FILES', requested.join(', '));
         const requestSummary = response.reason?.trim() || response.summary?.trim();
         emitNovaEvent({
@@ -667,13 +710,16 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
                 continue;
               }
               changedFiles.push({ path: file.path, content: file.content, sha256: file.sha256 });
+              logger.record('files.read', { path: file.path, sha256: file.sha256, bytes: file.bytes, transmitted: true });
               outgoingBytes += file.bytes;
               loaded.push(`${file.path} (SHA-256 ${file.sha256}; ${file.bytes} octets)`);
             } else {
+              logger.record('files.read', { path: file.path, sha256: file.sha256, bytes: file.bytes, transmitted: false, reason: 'unchanged' });
               loaded.push(`${file.path} (déjà transmis, contenu inchangé; SHA-256 ${file.sha256})`);
             }
           } catch (error) {
             const issue = asNovaError(error);
+            logger.record('files.read.error', { path: requestedPath, code: issue.code, message: issue.message, stack: issue.stack });
             denied.push(`${requestedPath}: ${issue.message}`);
           }
         }
@@ -710,6 +756,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       }
 
       if (response.status === 'PATCH_READY') {
+        logger.record('patch.received', { messageId: responseMessageId, summary: response.summary, patch: response.patch, suggestedTests: response.tests });
         renderStatus('PATCH_READY', 'diff préparé');
         transition(session, 'VALIDATING_PATCH', 'Validation du patch, des chemins et des empreintes d’origine.');
         const prepared = await validatePatch(projectRoot, response.patch!, session.fileHashes, config.patches.maxPatchBytes);
@@ -761,6 +808,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         }
         const desktopPatchDecision = session.approvalPolicy?.write ? 'approve' : await requestNovaApproval({ kind: 'patch', operationId, summary: record.summary, files: patchFiles, diff: response.patch!, reportPath, sessionId: session.id });
         const patchApproved = desktopPatchDecision === undefined ? await approveOrReject('Appliquer ce patch ?') : desktopPatchDecision !== 'reject';
+        logger.record('patch.approval', { operationId, decision: session.approvalPolicy?.write ? 'approved-by-policy' : patchApproved ? 'approved' : 'rejected', files: patchFiles.map((file) => file.path) });
         if (!session.approvalPolicy?.write && !patchApproved) {
           record.status = 'REJECTED';
           record.errors.push('Patch explicitement refusé par l’utilisateur ; les fichiers source ne sont pas modifiés.');
@@ -794,6 +842,14 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
     return session;
   } catch (error) {
     const issue = asNovaError(error);
+    logger.record('session.error', {
+      code: issue.code,
+      message: issue.message,
+      stack: issue.stack,
+      cause: issue.cause instanceof Error ? { name: issue.cause.name, message: issue.cause.message, stack: issue.cause.stack } : issue.cause,
+      messageIds: [...messageIds],
+      providerConversationUrl: provider?.getState?.() ?? session.providerState,
+    });
     if (issue.code === 'SESSION_CANCELLED') {
       session.error = 'SESSION_CANCELLED';
       transition(session, 'PAUSED', 'Tâche arrêtée depuis le desktop. La session peut être reprise.');
@@ -808,12 +864,20 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
     throw issue;
   } finally {
     if (provider) {
+      const closingProvider = provider;
       const providerState = provider.getState?.() ?? session.providerState;
       if (providerState) session.providerState = providerState;
       else delete session.providerState;
       await saveSession(session).catch(() => undefined);
-      await provider.close({ terminateBrowser: options.terminateBrowserOnClose ?? false }).catch(() => undefined);
+      logger.record('provider.close.start', { providerId: closingProvider.id, terminateBrowser: options.terminateBrowserOnClose ?? false });
+      await closingProvider.close({ terminateBrowser: options.terminateBrowserOnClose ?? false }).then(
+        () => logger.record('provider.close.complete', { providerId: closingProvider.id }),
+        (error: unknown) => logger.record('provider.close.error', { providerId: closingProvider.id, message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }),
+      );
     }
+    logger.record('session.finish', { state: session.state, error: session.error, messageIds: [...messageIds] });
+    await logger.flush();
   }
+  });
   });
 }

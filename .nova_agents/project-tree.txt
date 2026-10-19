@@ -106,6 +106,7 @@ nova-agent/
 │   │   ├── events.ts
 │   │   ├── orchestrator.ts
 │   │   ├── persistence.ts
+│   │   ├── session-logger.ts
 │   │   ├── state-machine.ts
 │   │   └── steering.ts
 │   ├── utils/

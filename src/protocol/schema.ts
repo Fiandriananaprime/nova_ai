@@ -45,6 +45,8 @@ export interface AIRequest {
   files?: Array<{ path: string; content: string; sha256: string }>;
   signal?: AbortSignal;
   forceInitialPrompt?: boolean;
+  /** Internal diagnostic hook; never serialized into the provider prompt. */
+  onTrace?: (stage: string, details?: Record<string, unknown>) => void;
 }
 
 export interface AIProvider {
