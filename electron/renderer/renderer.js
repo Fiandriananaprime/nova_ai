@@ -62,9 +62,16 @@ window.novaDesktop.onEvent(event=>{
   if(event.type==='summary')addMessage('assistant','Nova',event.text);
   if(event.type==='patch-ready'){state.pendingPatch=event;for(const f of event.files||[])updateChange(f.path,{...f,diff:event.diff});if(!event.files?.length)updateChange('Patch Nova',{diff:event.diff});$('diff-view').innerHTML=`<div class="diff-summary"><strong>Patch préparé</strong><p>${esc(event.summary)}</p><pre class="diff-code">${renderDiff(event.diff)}</pre></div>`; $('apply-changes').disabled=false;document.querySelector('[data-diff-tab="diff"]').click();}
   if(event.type==='error'){addMessage('error',event.code,event.message);toast(event.message);}
-  if(event.type==='completed'){state.running=false;setStatus(event.state,false);$('session-info').textContent=event.sessionId;state.sessionId=event.sessionId;toast(event.state==='DONE'?'Tâche terminée. Les modifications restent à appliquer.':'Session terminée.');}
+  if(event.type==='completed'){state.running=false;setStatus(event.state,false);$('session-info').textContent=event.sessionId;state.sessionId=event.sessionId;toast(event.state==='DONE'?(state.pendingPatch?'Tâche terminée. Examine le diff et approuve le patch.':'Tâche terminée.'):'Session terminée.');}
 });
 window.novaDesktop.onInstallProgress(({state:status,message})=>{ $('install-state').textContent=message; if(status==='error')toast(message); });
+window.novaDesktop.onUpdateStatus(async update=>{
+  if(update.state==='available') { if(confirm('Une nouvelle version de Nova Agent Desktop ('+update.version+') est disponible. La télécharger maintenant ?')) { try { await window.novaDesktop.downloadUpdate(); toast('Téléchargement de la mise à jour…'); } catch(e) { toast('Mise à jour impossible : '+e.message); } } }
+  else if(update.state==='downloading') { $('install-state').textContent='Mise à jour : '+update.percent+'%'; }
+  else if(update.state==='downloaded') { $('install-state').textContent='Mise à jour prête'; if(confirm('La mise à jour '+update.version+' est téléchargée. Redémarrer Nova pour l’installer ?')) await window.novaDesktop.installUpdate(); }
+  else if(update.state==='current') { $('install-state').textContent='Desktop à jour · '+update.version; }
+  else if(update.state==='error') { $('install-state').textContent='Mise à jour indisponible'; }
+});
 $('open-project').addEventListener('click',openProject);
 $('refresh-tree').addEventListener('click',async()=>{if(!state.projectRoot)return;try{const result=await window.novaDesktop.refreshTree(state.projectRoot);setFiles(result.files);toast('Arborescence actualisée.');}catch(e){toast(e.message);}});
 async function openProject(){try{const result=await window.novaDesktop.pickProject();if(!result)return;state.projectRoot=result.projectRoot;$('project-label').textContent=result.projectRoot;$('project-name').textContent='⌄  '+result.projectRoot.split(/[\\/]/).pop().toUpperCase();$('provider').value=result.providerId;setFiles(result.files);addMessage('system','Projet ouvert',result.projectRoot);setStatus('Projet prêt',false);$('task-input').focus();}catch(e){toast(e.message);}}
