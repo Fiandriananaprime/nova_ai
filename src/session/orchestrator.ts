@@ -516,6 +516,27 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         }
       }
 
+      if (session.fileTransferActive && response.status === 'TRANSFER_STOP' && session.fileTransferCurrentPath
+        && (!response.receivedFile?.trim() || !response.chunkIndex)) {
+        const currentPath = session.fileTransferCurrentPath;
+        const expectedChunkIndex = session.fileTransferChunkIndex ?? 1;
+        const hasConflictingPath = Boolean(response.receivedFile?.trim() && response.receivedFile !== currentPath);
+        const hasConflictingChunk = Boolean(response.chunkIndex && response.chunkIndex !== expectedChunkIndex);
+        if (!hasConflictingPath && !hasConflictingChunk) {
+          response = {
+            ...response,
+            receivedFile: response.receivedFile?.trim() ? response.receivedFile : currentPath,
+            chunkIndex: response.chunkIndex ?? expectedChunkIndex,
+          };
+          logger.record('file_transfer.stop_metadata_recovered', {
+            path: currentPath,
+            chunkIndex: expectedChunkIndex,
+            missingPath: !response.receivedFile?.trim(),
+            missingChunkIndex: !response.chunkIndex,
+          });
+        }
+      }
+
       if (session.fileTransferActive) {
         const currentPath = session.fileTransferCurrentPath;
         const expectedChunkIndex = session.fileTransferChunkIndex ?? 1;
