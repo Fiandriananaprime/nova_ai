@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+<title>Nova Agent</title><link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="brand-mark">N</div><div><strong>nova</strong><small>AGENT DESKTOP</small></div></div>
+    <div class="project-pill"><span class="live-dot"></span><span id="project-label">Aucun projet ouvert</span><button id="open-project" class="quiet">Ouvrir un projet <kbd>Ctrl O</kbd></button></div>
+    <div class="top-actions"><button id="refresh-tree" class="icon-button" title="Actualiser l’arborescence">↻</button><button id="settings" class="icon-button" title="Informations">⚙</button><div class="avatar">N</div></div>
+  </header>
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="side-heading"><span>EXPLORATEUR</span><button id="collapse-files" class="quiet">−</button></div>
+      <div id="project-name" class="root-label">⌄ &nbsp; OUVRIR UN DOSSIER</div>
+      <div id="file-tree" class="file-tree"><div class="empty-tree">Ouvre un projet pour afficher son arborescence.</div></div>
+      <div class="side-bottom"><div class="side-heading"><span>SESSION</span></div><div id="session-info" class="session-info">Aucune session active</div><div class="side-heading"><span>ENVIRONNEMENT</span></div><div class="env-row"><span class="env-dot"></span><span>Nova Core</span><span class="env-state">Prêt</span></div><div class="env-row"><span class="env-dot dim"></span><span>Tests</span><span class="env-state">À exécuter</span></div></div>
+    </aside>
+    <main class="main-panel">
+      <div class="main-tabs"><div class="tab active"><span class="tab-icon">✳</span> Nova <span class="tab-close">×</span></div><div class="main-status"><span class="status-dot"></span><span id="status-text">En attente</span></div></div>
+      <section id="welcome" class="welcome">
+        <div class="hero-icon">✳</div><div class="eyebrow">VOTRE AGENT DE DÉVELOPPEMENT</div>
+        <h1>Que construisons-nous<br><span>aujourd’hui ?</span></h1>
+        <p>Nova explore votre code, propose des modifications et vous laisse le contrôle à chaque étape.</p>
+        <div class="suggestions"><button class="suggestion" data-prompt="Analyse l’architecture de ce projet et propose les améliorations prioritaires."><span>⌘</span><div><strong>Comprendre le projet</strong><small>Architecture et points à améliorer</small></div><span class="arrow">↗</span></button><button class="suggestion" data-prompt="Repère les bugs les plus probables et propose un correctif avec tests."><span>⌕</span><div><strong>Détecter les bugs</strong><small>Analyse et correctifs vérifiables</small></div><span class="arrow">↗</span></button><button class="suggestion" data-prompt="Ajoute la fonctionnalité suivante en respectant les conventions du projet : "><span>＋</span><div><strong>Ajouter une fonctionnalité</strong><small>Planifier et implémenter proprement</small></div><span class="arrow">↗</span></button></div>
+      </section>
+      <section id="conversation" class="conversation" aria-live="polite"></section>
+      <div id="approval-panel" class="approval-panel hidden"></div>
+      <form id="composer" class="composer">
+        <textarea id="task-input" rows="3" placeholder="Demandez à Nova de modifier votre projet… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)" maxlength="10000"></textarea>
+        <div class="composer-bottom"><div class="composer-controls"><label class="model-label">MODÈLE <select id="provider"><option value="chatgpt-web">ChatGPT Web</option><option value="claude-web">Claude Web</option><option value="gemini-web">Gemini Web</option><option value="mock">Mock (tests)</option></select></label><span class="privacy-label">◈ Vos fichiers restent locaux jusqu’à leur transmission</span></div><button id="send-task" class="send-button" type="submit">Lancer la tâche <span>↑</span></button></div>
+      </form>
+      <div class="bottom-note"><span>Nova peut faire des erreurs. Vérifiez les modifications avant de les appliquer.</span><span id="install-state">CLI : vérification…</span></div>
+    </main>
+    <aside class="diff-panel">
+      <div class="diff-header"><div><span class="diff-heading-icon">⌘</span><strong>Modifications</strong></div><span id="diff-count" class="count">0</span></div>
+      <div class="diff-tabs"><button class="diff-tab active" data-diff-tab="changes">Changements</button><button class="diff-tab" data-diff-tab="diff">Diff</button></div>
+      <div id="change-list" class="change-list"><div class="diff-empty"><div class="diff-empty-icon">⇄</div><strong>Aucun changement pour le moment</strong><p>Les fichiers modifiés par Nova apparaîtront ici avec leur diff avant/après.</p></div></div>
+      <div id="diff-view" class="diff-view hidden"><div class="diff-empty"><div class="diff-empty-icon">⌁</div><strong>Le diff apparaîtra ici</strong><p>Lance une tâche et sélectionne un fichier modifié.</p></div></div>
+      <div class="diff-footer"><div class="footer-label"><span class="footer-dot"></span>VALIDATION MANUELLE</div><button id="apply-changes" class="apply-button" disabled>Appliquer les changements <span>→</span></button><small>Nova prépare les patchs sans modifier les sources automatiquement.</small></div>
+    </aside>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <dialog id="info-dialog"><form method="dialog"><button class="dialog-close">×</button><h2>Nova Agent Desktop</h2><p>Application Electron sécurisée connectée au moteur Nova existant.</p><p id="version-info"></p><button class="primary" value="close">Fermer</button></form></dialog>
+</div>
+<script src="./renderer.js"></script>
+</body></html>
