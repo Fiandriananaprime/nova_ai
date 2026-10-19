@@ -81,7 +81,7 @@ nova.cmd
 nova fix "Analyse src/server.ts" --no-apply
 ```
 
-Sans argument, Nova ouvre une interface interactive dans le terminal avec son logo et l’état `thinking` pendant les réponses. Décris une tâche à l’invite `nova ›`; les événements `read` et `write` indiquent les fichiers transmis ou modifiés. À la fin, le lien du rapport `.md` ouvre le diff dans les terminaux compatibles OSC 8. Pendant l’approbation, `approve all` valide tous les fichiers du patch courant. Utilise `/model list` pour choisir entre `chatgpt`, `claude` et `gemini`, ou `/model <nom>` pour changer le modèle actif du projet. Les commandes CLI restent disponibles. Nova utilise le dossier courant comme projet. Ajoute `--project "D:\Project\AutreProjet"` pour cibler un autre dossier. Sans installation globale : `npm.cmd run dev -- <commande>`.
+Sans argument, Nova ouvre une interface interactive dans le terminal avec son logo, sa version et l’état `thinking` pendant les réponses. Décris une tâche à l’invite `nova ›`; les événements `read` et `write` indiquent les fichiers transmis ou modifiés. Pendant que Nova attend l’IA, ajoute une consigne avec `/steer <message>`; depuis un autre terminal, utilise `nova steer "<message>" --project <dossier>` pour la session courante. À la fin, le lien du rapport `.md` ouvre le diff dans les terminaux compatibles OSC 8. Pendant l’approbation, `approve all` valide tous les fichiers du patch courant. Utilise `/model list` pour choisir entre `chatgpt`, `claude` et `gemini`, ou `/model <nom>` pour changer le modèle actif du projet. Les commandes CLI restent disponibles. Nova utilise le dossier courant comme projet. Ajoute `--project "D:\Project\AutreProjet"` pour cibler un autre dossier. Sans installation globale : `npm.cmd run dev -- <commande>`.
 
 ## Premier lancement
 
@@ -173,6 +173,7 @@ npm run dev -- undo --project "D:\Project\MonProjet"
 | `nova-agent resume <session-id>` | Reprend une session locale persistée. |
 | `nova-agent model list` | Liste les modèles et le modèle actif du projet. |
 | `nova-agent model use <model>` | Change le modèle par défaut (`chatgpt`, `claude`, `gemini` ou `mock`). |
+| `nova-agent steer <message>` | Ajoute une consigne à la session active pendant l’attente d’une réponse IA. |
 
 Les commandes qui prennent en charge un projet acceptent `--project <path>`. Exemple PowerShell avec espaces :
 

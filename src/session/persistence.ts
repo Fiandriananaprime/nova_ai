@@ -39,6 +39,10 @@ export interface PersistedSession {
   contextSent: boolean;
   /** Whether the general system prompt and protocol were sent in this provider conversation. */
   generalPromptSent?: boolean;
+  /** Number of append-only steering messages already consumed for this session. */
+  steeringCursor?: number;
+  /** Steering guidance deferred until a one-by-one file transfer is complete. */
+  pendingSteeringMessages?: string[];
   providerState?: string;
   pendingOperationId?: string;
   error?: string;

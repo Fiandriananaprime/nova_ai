@@ -2,6 +2,8 @@
 
 Every model response is one JSON object, validated by Zod before the orchestration layer uses it.
 
+While a response is being prepared, Nova may append a new user steering instruction to the current task. Re-evaluate the answer using that guidance before returning a final status. Steering does not change the JSON schema and is not file content.
+
 ```json
 {
   "protocol": "nova-agent/1",

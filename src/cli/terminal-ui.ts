@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stdout } from 'node:process';
+import { NOVA_VERSION } from '../version.js';
 
 const ansiEnabled = Boolean(stdout.isTTY && !process.env.NO_COLOR);
 const HEADER_ROWS = 9;
@@ -22,7 +23,7 @@ function headerLines(projectRoot: string): string[] {
   const shortPath = Array.from(projectRoot).length > width ? `…${Array.from(projectRoot).slice(-(width - 1)).join('')}` : projectRoot;
   return [
     ...logo.split('\n').map((line) => color(line, 36)),
-    `${color('NOVA', 1)} ${color('local coding agent', 90)}`,
+    `${color('NOVA', 1)} ${color(`v${NOVA_VERSION}`, 90)} ${color('local coding agent', 90)}`,
     color(shortPath, 90),
     color('─'.repeat(Math.min(width, 72)), 90),
   ];

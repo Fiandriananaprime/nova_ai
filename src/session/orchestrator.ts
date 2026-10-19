@@ -24,6 +24,7 @@ import { loadIgnoreRules, isIgnored } from '../context/ignore.js';
 import { saveSession, type PersistedSession } from './persistence.js';
 import { assertNoPotentialSecret } from '../security/secrets.js';
 import type { ProjectFile } from '../context/file-reader.js';
+import { captureInteractiveSteering, consumeSteeringMessages, formatSteering } from './steering.js';
 
 export interface FixOptions {
   projectRoot: string;
@@ -243,6 +244,10 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
     provider.restoreState?.(session.providerState);
 
     while (cycleLimit === undefined || session.cycle < cycleLimit) {
+      if (!session.fileTransferActive && session.pendingSteeringMessages?.length) {
+        nextMessage += formatSteering(session.pendingSteeringMessages);
+        session.pendingSteeringMessages = [];
+      }
       session.cycle += 1;
       transition(session, 'SENDING_PROMPT', `Envoi de l’échange ${session.cycle} au fournisseur ${session.providerId}.`);
       await saveSession(session);
@@ -262,11 +267,13 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       const deliveredFiles = request.files ?? [];
       outgoingFiles = [];
       const stopThinking = startThinking();
+      const stopSteeringCapture = captureInteractiveSteering(projectRoot, session.id);
       let response: AIResponse;
       try {
         response = await provider.send(request);
       } finally {
         stopThinking();
+        await stopSteeringCapture();
       }
       if (session.fileTransferActive) {
         if (session.fileTransferChunkIndex === 1) for (const file of deliveredFiles) renderEvent('read', file.path);
@@ -284,6 +291,20 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       else delete session.providerState;
       session.contextSent = true;
       transition(session, 'PARSING_RESPONSE', `Réponse reçue : ${response.status}.`);
+      const steeringMessages = await consumeSteeringMessages(session);
+      if (steeringMessages.length) {
+        session.pendingSteeringMessages = [...(session.pendingSteeringMessages ?? []), ...steeringMessages];
+        renderStatus('STEER', `${steeringMessages.length} consigne(s) intégrée(s) à la session`);
+      }
+      if (!session.fileTransferActive && session.pendingSteeringMessages?.length
+        && (response.status === 'DONE' || response.status === 'PATCH_READY')) {
+        nextMessage = `Réévalue ta réponse précédente (${response.status}) à la lumière des consignes utilisateur suivantes. N'applique ni ne termine la tâche avant cette réévaluation. ${formatSteering(session.pendingSteeringMessages)}`;
+        session.pendingSteeringMessages = [];
+        transition(session, 'ANALYZING_CONTEXT', 'Une consigne de steering est arrivée pendant la préparation de la réponse ; réévaluation demandée.');
+        session.pendingMessage = nextMessage;
+        await saveSession(session);
+        continue;
+      }
       await saveSession(session);
 
       if (session.fileTransferActive) {

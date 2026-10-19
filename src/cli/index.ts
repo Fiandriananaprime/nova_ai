@@ -13,6 +13,8 @@ import { undoCommand } from './commands/undo.js';
 import { historyCommand } from './commands/history.js';
 import { resumeCommand } from './commands/resume.js';
 import { interactiveCommand } from './commands/interactive.js';
+import { steerCommand } from './commands/steer.js';
+import { NOVA_VERSION } from '../version.js';
 import { NovaError, asNovaError } from '../utils/errors.js';
 import { isInteractive } from '../utils/fs.js';
 
@@ -20,7 +22,7 @@ const program = new Command();
 program
   .name('nova')
   .description('Agent de développement local : contexte, IA via navigateur, patchs contrôlés et rollback.')
-  .version('0.1.0')
+  .version(NOVA_VERSION)
   .showHelpAfterError()
   .showSuggestionAfterError();
 
@@ -84,6 +86,13 @@ program.command('resume')
   .option('-p, --project <path>', 'projet cible', '.')
   .option('--provider <id>', 'changer explicitement de fournisseur')
   .action(async (sessionId: string, options: { project: string; provider?: string }) => resumeCommand(sessionId, options.project, options.provider));
+
+program.command('steer')
+  .description('Ajoute une consigne à une session Nova en cours.')
+  .argument('<message>', 'consigne à intégrer à la tâche active')
+  .option('-p, --project <path>', 'projet cible', '.')
+  .option('--session <session-id>', 'identifiant de session ; par défaut la session courante du projet')
+  .action(async (message: string, options: { project: string; session?: string }) => steerCommand(message, options.project, options.session));
 
 const model = program.command('model').description('Liste et sélectionne les fournisseurs IA.');
 model.command('list').description('Liste les modèles intégrés et le modèle actif.').option('-p, --project <path>', 'projet cible', '.')
