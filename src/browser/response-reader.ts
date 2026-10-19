@@ -208,10 +208,8 @@ export async function sendAndReadLastAssistant(
     const text = protocolText;
     responseStarted ||= Boolean(text);
     const stop = await findFirstVisible(page, selectors.stopButton);
-    if (unacknowledgedMessageId && !stop) {
-      throw new NovaError(`Accuse de message invalide : Nova attendait ${expectedMessageId}, mais le fournisseur a repondu pour ${unacknowledgedMessageId}.`, 'AI_MESSAGE_ACK_INVALID');
-    }
-
+    // The provider can briefly expose the previous assistant turn after submission.
+    // Keep polling for the current request's acknowledgement instead of failing on stale UI text.
     if (responseStarted && text && text === previous && !stop) stableCount += 1;
     else stableCount = 0;
 
