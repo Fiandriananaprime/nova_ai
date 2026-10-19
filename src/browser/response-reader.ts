@@ -92,10 +92,8 @@ async function readPageText(page: Page, timeout?: number): Promise<string> {
 }
 
 /**
- * Read newly added assistant nodes, then the latest assistant node (for virtualised chat
- * lists), then a page-text fallback with user-message nodes removed. The fallback preserves
- * support for providers whose assistant selector misses the rendered reply without allowing
- * Nova's own prompt and its protocol examples to be mistaken for that reply.
+ * Read newly added assistant nodes, then the latest assistant node for virtualised chat
+ * lists. Never scrape the whole page: it contains the outgoing prompt and protocol examples.
  */
 async function readResponseCandidates(
   page: Page,
@@ -119,6 +117,17 @@ async function readResponseCandidates(
     }
   }
   return candidates;
+}
+
+
+/** Do not use unanchored fallback text once the current outgoing user message was found. */
+export async function selectResponseCandidates(
+  userMessageFound: boolean,
+  anchoredCandidates: string[],
+  readFallbackCandidates: () => Promise<string[]>,
+): Promise<string[]> {
+  if (userMessageFound) return anchoredCandidates;
+  return readFallbackCandidates();
 }
 
 
@@ -390,9 +399,11 @@ export async function sendAndReadLastAssistant(
     ];
     // Once the outgoing message is located, only inspect nodes after that anchor.
     // Whole-page text can include JSON examples from the user's own prompt.
-    const candidates = anchored.userMessageFound
-      ? anchoredCandidates
-      : await readResponseCandidates(page, assistant, beforeAssistantCount);
+    const candidates = await selectResponseCandidates(
+      anchored.userMessageFound,
+      anchoredCandidates,
+      () => readResponseCandidates(page, assistant, beforeAssistantCount),
+    );
     const latestAssistantText = anchored.userMessageFound
       ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? ''
       : assistant
