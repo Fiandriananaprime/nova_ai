@@ -22,8 +22,6 @@ const STABLE_POLLS_FOR_WRONG_ACK = 4;
 const STABLE_POLLS_INVALID_REPLY_WITHOUT_STOP = 8;
 /** A stuck stop control must not allow a malformed reply to wait forever. */
 const STABLE_POLLS_INVALID_REPLY_WITH_STOP = 12;
-/** Generic following-turn siblings can be transient UI artifacts; require meaningful text there. */
-const MIN_UNANCHORED_INVALID_REPLY_CHARACTERS = 3;
 /** Max assistant nodes read per poll, newest first, to keep each poll cheap. */
 const MAX_ASSISTANT_NODES_READ = 5;
 /** Max `{` positions tried before one `"protocol"` key (the key is not always the first one in the object). */
@@ -142,8 +140,9 @@ export async function selectResponseCandidates(
  * their contents still have to remain stable across several polls before failing.
  */
 export function isCredibleInvalidReplyCandidate(text: string, hasDedicatedAssistantNode: boolean): boolean {
-  const normalized = text.trim();
-  return normalized.length >= (hasDedicatedAssistantNode ? 1 : MIN_UNANCHORED_INVALID_REPLY_CHARACTERS);
+  // Generic following-turn siblings can be buttons, status labels, or streaming placeholders.
+  // Only actual assistant/protocol nodes are sufficient evidence of a malformed reply.
+  return hasDedicatedAssistantNode && Boolean(text.trim());
 }
 
 
@@ -240,23 +239,42 @@ async function readAssistantMessagesAfterOutgoingMessage(
       .filter(Boolean)
       .slice(-12);
 
-    // Also inspect the conversation turn immediately after the anchored user turn.
-    // This handles providers whose rendered assistant content has no stable role selector.
+    // Prefer actual conversation-turn containers. They may not be direct siblings of the
+    // selected user bubble, depending on ChatGPT's current nested DOM structure.
     let followingTurnTexts: string[] = [];
     const turnSelector = '[data-testid^="conversation-turn-"], [data-testid*="conversation-turn"]';
-    const outgoingTurn = outgoing!.closest(turnSelector)
+    const conversationTurns = queryNodes([turnSelector]);
+    const outgoingConversationTurn = conversationTurns
+      .filter((turn) => turn === outgoing || turn.contains(outgoing))
+      .sort((left, right) => textOf(left).length - textOf(right).length)[0];
+    const outgoingTurn = outgoingConversationTurn
+      ?? outgoing!.closest(turnSelector)
       ?? outgoing!.closest('article')
       ?? outgoing!.closest('[data-message-id]')
       ?? outgoing!;
-    const parent = outgoingTurn.parentElement;
-    if (parent) {
-      const siblings = Array.from(parent.children);
-      const anchorIndex = siblings.indexOf(outgoingTurn);
-      for (const sibling of siblings.slice(anchorIndex + 1, anchorIndex + 6)) {
-        if (options.userSelectors.length && sibling.querySelector(options.userSelectors.join(','))) break;
-        const value = textOf(sibling);
-        if (value && !sibling.querySelector('textarea, input, [contenteditable="true"]')) {
-          followingTurnTexts.push(value);
+    const nextConversationTurns = outgoingConversationTurn
+      ? conversationTurns.filter((turn) => turn !== outgoingTurn && followsOutgoingMessage(turn)).slice(0, 6)
+      : [];
+    for (const turn of nextConversationTurns) {
+      // Stop at the next user turn; never drift into later exchanges.
+      if (options.userSelectors.length && (turn.matches(options.userSelectors.join(',')) || turn.querySelector(options.userSelectors.join(',')))) break;
+      const value = textOf(turn);
+      if (value && !turn.querySelector('textarea, input, [contenteditable="true"]')) {
+        followingTurnTexts.push(value);
+      }
+    }
+    // Fallback for providers that do not expose conversation-turn containers.
+    if (!followingTurnTexts.length) {
+      const parent = outgoingTurn.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children);
+        const anchorIndex = siblings.indexOf(outgoingTurn);
+        for (const sibling of siblings.slice(anchorIndex + 1, anchorIndex + 6)) {
+          if (options.userSelectors.length && (sibling.matches(options.userSelectors.join(',')) || sibling.querySelector(options.userSelectors.join(',')))) break;
+          const value = textOf(sibling);
+          if (value && !sibling.querySelector('textarea, input, [contenteditable="true"]')) {
+            followingTurnTexts.push(value);
+          }
         }
       }
     }
@@ -458,15 +476,18 @@ export async function sendAndReadLastAssistant(
       () => readResponseCandidates(page, assistant, beforeAssistantCount),
     );
     const latestAssistantText = anchored.userMessageFound
-      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? anchored.followingTurnTexts.at(-1) ?? ''
+      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? ''
       : assistant
         ? await assistant.last().innerText({ timeout: 1000 }).catch(() => '')
         : '';
+    const latestCandidateText = anchored.userMessageFound
+      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? anchored.followingTurnTexts.at(-1) ?? ''
+      : latestAssistantText;
+    const candidateChanged = Boolean(latestCandidateText.trim())
+      && latestCandidateText !== beforeLatestAssistantText;
     const assistantReplyChanged = Boolean(latestAssistantText.trim())
       && latestAssistantText !== beforeLatestAssistantText;
-    const hasDedicatedAssistantNode = anchored.userMessageFound
-      ? Boolean(anchored.assistantTexts.at(-1)?.trim() || anchored.protocolTexts.at(-1)?.trim())
-      : Boolean(latestAssistantText.trim());
+    const hasDedicatedAssistantNode = Boolean(latestAssistantText.trim());
     const credibleInvalidReply = isCredibleInvalidReplyCandidate(latestAssistantText, hasDedicatedAssistantNode);
     let text = anchored.userMessageFound
       ? extractProtocolResponseAfterOutgoingMessage(anchored.assistantTexts, expectedMessageId)
@@ -479,7 +500,7 @@ export async function sendAndReadLastAssistant(
       }
     }
     let wrongAck: string | undefined;
-    if (!text && assistantReplyChanged) {
+    if (!text && candidateChanged) {
       const protocolCandidates = anchored.userMessageFound
         ? anchoredCandidates
         : [latestAssistantText];
@@ -511,6 +532,7 @@ export async function sendAndReadLastAssistant(
           stableInvalidReplyCount,
           stopVisible: stop,
           replyCharacters: latestAssistantText.length,
+          candidateSource: anchored.userMessageFound && !hasDedicatedAssistantNode ? 'generic-following-turn-only' : 'assistant-node',
         });
         throw new NovaError('Réponse incompatible avec nova-agent/1 : une réponse assistant est apparue, mais aucun objet JSON de protocole valide ne correspond à la demande.', 'AI_PROTOCOL_INVALID');
       }
