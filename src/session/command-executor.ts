@@ -5,6 +5,7 @@ import { renderStatus } from '../cli/terminal-ui.js';
 import { containsPotentialSecret } from '../security/secrets.js';
 import { NovaError } from '../utils/errors.js';
 import type { PersistedSession } from './persistence.js';
+import { requestNovaApproval, emitNovaEvent } from './events.js';
 
 const COMMAND_TIMEOUT_MS = 120_000;
 
@@ -22,6 +23,15 @@ export interface CommandOutcome {
 
 async function approveCommand(command: string, reason: string, session: PersistedSession): Promise<boolean> {
   if (session.approvalPolicy?.commands) return true;
+  const desktopDecision = await requestNovaApproval({ kind: 'command', command, reason, cwd: path.resolve(session.projectRoot), sessionId: session.id });
+  if (desktopDecision !== undefined) {
+    if (desktopDecision === 'approve-session') {
+      session.approvalPolicy ??= { read: false, write: false, commands: false };
+      session.approvalPolicy.commands = true;
+      return true;
+    }
+    return desktopDecision === 'approve';
+  }
   if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
   console.log(`\nCommande demandée par l'IA :\n  ${command}`);
   console.log(`Motif : ${terminalSafe(reason) || '(non précisé)'}`);
@@ -50,6 +60,7 @@ export async function executeRequestedCommand(
   }
   if (!await approveCommand(command, reason, session)) {
     renderStatus('COMMAND_REJECTED', 'commande non exécutée');
+    emitNovaEvent({ type: 'status', sessionId: session.id, state: 'WAITING_FOR_APPROVAL', detail: 'Commande refusée ; aucune commande exécutée.', at: new Date().toISOString() });
     return { approved: false, exitCode: null, stdout: '', stderr: 'Commande refusée par l’utilisateur.' };
   }
 
