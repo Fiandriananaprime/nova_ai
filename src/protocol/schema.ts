@@ -23,7 +23,8 @@ export const AIResponseSchema = z.object({
   const effectiveStatus = value.nextStatus ?? value.status;
   if (effectiveStatus === 'NEED_FILES' && (!value.files || value.files.length === 0)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NEED_FILES exige au moins un chemin dans files.' });
   if (value.status === 'FILE_RECEIVED' && (!value.receivedFile?.trim() || !value.chunkIndex)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'FILE_RECEIVED exige receivedFile et chunkIndex.' });
-  if (effectiveStatus === 'TRANSFER_STOP' && (!value.receivedFile?.trim() || !value.chunkIndex)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'TRANSFER_STOP exige receivedFile et chunkIndex.' });
+  // A standalone TRANSFER_STOP may omit chunk metadata; the orchestrator fills it from the active local transfer.
+  // FILE_RECEIVED (including FILE_RECEIVED + nextStatus TRANSFER_STOP) still requires explicit metadata.
   if (effectiveStatus === 'NEED_INFO' && !value.question?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NEED_INFO exige une question.' });
   if (effectiveStatus === 'RUN_COMMAND' && !value.command?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'RUN_COMMAND exige une commande non vide.' });
   if (effectiveStatus === 'RUN_COMMAND' && !value.commandReason?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'RUN_COMMAND exige un motif.' });
