@@ -236,25 +236,43 @@ async function readAssistantMessagesAfterOutgoingMessage(
       }
       return false;
     };
-    // Provider-specific selectors can be transient (for example, a streaming-only
-    // selector disappears as soon as generation finishes). Include semantic and common
-    // rendered-response selectors as independent fallbacks.
-    const allAssistantSelectors = [
+    // Prefer complete semantic assistant messages. Generic selectors such as
+    // ".markdown" often match descendants inside the same message and must not
+    // compete with the message container itself.
+    const dedicatedAssistantNodes = queryNodes([
       ...options.assistantSelectors,
       '[data-message-author-role="assistant"]',
       '[data-message-author-role="model"]',
-      '[data-is-streaming]',
-      'model-response',
-      '[data-testid*="assistant"]',
-      '[data-testid*="response"]',
-      '.markdown',
-    ];
-    const assistantTexts = queryNodes(allAssistantSelectors)
-      .filter(followsOutgoingMessage)
-      .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)
+    ]).filter(followsOutgoingMessage);
+
+    const keepOutermostNodes = (nodes: Element[]): Element[] =>
+      nodes.filter((node) =>
+        !nodes.some((other) => other !== node && other.contains(node)),
+      );
+
+    const dedicatedMessages = keepOutermostNodes(dedicatedAssistantNodes);
+
+    // Generic selectors are only a fallback when semantic message selectors
+    // find nothing. This avoids mixing full messages with markdown descendants.
+    const fallbackNodes = dedicatedMessages.length > 0
+      ? []
+      : queryNodes([
+          'model-response',
+          '[data-testid*="assistant"]',
+          '[data-testid*="response"]',
+          '[data-is-streaming]',
+          '.markdown',
+        ]).filter(followsOutgoingMessage);
+
+    const assistantNodes = dedicatedMessages.length > 0
+      ? dedicatedMessages
+      : keepOutermostNodes(fallbackNodes);
+
+    // Limit complete messages, not a mixed list of message containers and descendants.
+    const assistantTexts = assistantNodes
       .map(textOf)
       .filter(Boolean)
-      .slice(-12);
+      .slice(-MAX_ASSISTANT_NODES_READ);
 
     // Prefer actual conversation-turn containers. They may not be direct siblings of the
     // selected user bubble, depending on ChatGPT's current nested DOM structure.
@@ -474,10 +492,28 @@ export async function sendAndReadLastAssistant(
   let previousInvalidReply = '';
   let stableInvalidReplyCount = 0;
   let anchorLogged = false;
+  let watchPoll = 0;
 
   while (Date.now() < hardDeadline && Date.now() - lastActivity < timeoutMs) {
     await throwIfAborted(page, selectors, signal);
     const anchored = await readAssistantMessagesAfterOutgoingMessage(page, selectors, expectedMessageId);
+    watchPoll += 1;
+
+    // Emit periodic snapshots so an initially empty anchor poll does not hide
+    // whether the assistant response appears later in the watch loop.
+    if (anchored.userMessageFound && watchPoll % 5 === 0) {
+      trace('browser.message.watch_poll', {
+        expectedMessageId,
+        poll: watchPoll,
+        assistantMessages: anchored.assistantTexts.length,
+        protocolCandidates: anchored.protocolTexts.length,
+        responseTurns: anchored.responseTurnTexts.length,
+        followingTurns: anchored.followingTurnTexts.length,
+        assistantCharacters: anchored.assistantTexts.reduce((total, value) => total + value.length, 0),
+        followingTurnCharacters: anchored.followingTurnTexts.reduce((total, value) => total + value.length, 0),
+      });
+    }
+
     if (anchored.userMessageFound && !anchorLogged) {
       trace('browser.message.anchor_found', {
         expectedMessageId,
