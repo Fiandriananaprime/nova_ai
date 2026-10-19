@@ -31,7 +31,7 @@ import { ensureProjectInitialized } from '../context/project-setup.js';
 import { loadIgnoreRules, isIgnored } from '../context/ignore.js';
 import { assertSafeAgentPath, resolveAgentStorePath } from '../security/agent-files.js';
 import { pruneAgentFiles } from '../utils/retention.js';
-import { emitNovaEvent, requestNovaApproval, requestNovaAnswer, withNovaCoreCallbacks, type NovaCoreCallbacks } from './events.js';
+import { emitNovaEvent, getNovaCoreCallbacks, requestNovaApproval, requestNovaAnswer, withNovaCoreCallbacks, type NovaCoreCallbacks } from './events.js';
 
 export interface FixOptions {
   projectRoot: string;
@@ -516,8 +516,8 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         transition(session, 'WAITING_FOR_USER', question);
         await saveSession(session);
         console.log(`\nL’IA a besoin d’une précision :\n${question}`);
-        if (!isInteractive()) {
-          transition(session, 'PAUSED', 'Question sauvegardée ; reprise nécessaire dans un terminal interactif.');
+        if (!isInteractive() && !getNovaCoreCallbacks()?.requestAnswer) {
+          transition(session, 'PAUSED', 'Question sauvegardée ; reprise nécessaire dans un terminal interactif ou desktop.');
           session.error = 'NEED_INFO';
           await saveSession(session);
           console.log(`Session mise en pause. Reprends avec : npm run dev -- resume ${session.id}`);
@@ -650,7 +650,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         }
         transition(session, 'WAITING_FOR_APPROVAL', 'Attente de la confirmation explicite de l’utilisateur.');
         await saveSession(session);
-        if (!isInteractive()) {
+        if (!isInteractive() && !getNovaCoreCallbacks()?.requestApproval) {
           transition(session, 'PAUSED', 'Patch préparé ; confirmation interactive requise avant application.');
           await saveSession(session);
           console.log(`Patch en attente d’approbation. Applique-le avec : npm run dev -- apply --project \"${projectRoot}\"`);
