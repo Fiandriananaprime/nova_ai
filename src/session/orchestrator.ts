@@ -124,8 +124,9 @@ async function readRequestedFile(
     throw new NovaError(`Secret potentiel détecté dans ${requestedPath} ; approbation interactive requise.`, 'CONTENT_SECRET_APPROVAL_REQUIRED');
   }
 
-  let answer = '';
-  while (answer !== 'approve' && answer !== 'rejected') {
+  const desktopDecision = await requestNovaApproval({ kind: 'sensitive-file', path: requestedPath, reason: 'Nova a détecté un secret potentiel dans le contenu demandé par le fournisseur.', sessionId: session.id });
+  let answer = desktopDecision === undefined ? '' : desktopDecision === 'approve' ? 'approve' : 'rejected';
+  while (desktopDecision === undefined && answer !== 'approve' && answer !== 'rejected') {
     answer = (await ask(`Secret potentiel détecté dans ${requestedPath}. Tape approve pour transmettre ce fichier tel quel à l’IA, ou rejected pour le bloquer : `)).trim().toLowerCase();
     if (!answer) answer = 'rejected';
     else if (answer === 'rejecte') answer = 'rejected';
@@ -346,7 +347,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       if (session.fileTransferActive) {
         if (session.fileTransferChunkIndex === 1) for (const file of deliveredFiles) renderEvent('read', file.path);
       } else {
-        for (const file of deliveredFiles) renderEvent('read', file.path);
+        for (const file of deliveredFiles) { renderEvent('read', file.path); emitNovaEvent({ type: 'read', sessionId: session.id, path: file.path }); }
       }
       session.transmittedFileHashes = session.transmittedFileHashes ?? {};
       if (!session.fileTransferActive) {
@@ -503,8 +504,9 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         transition(session, 'DONE', response.reason ?? 'Le fournisseur indique que la tâche est terminée sans patch.');
         await saveSession(session);
         renderDone([], projectRoot);
+        emitNovaEvent({ type: 'completed', sessionId: session.id, state: 'DONE' });
         const completionSummary = response.summary ?? response.reason;
-        if (completionSummary) renderSummary(completionSummary);
+        if (completionSummary) { renderSummary(completionSummary); emitNovaEvent({ type: 'summary', sessionId: session.id, text: completionSummary }); }
         return session;
       }
 
@@ -521,7 +523,8 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           console.log(`Session mise en pause. Reprends avec : npm run dev -- resume ${session.id}`);
           return session;
         }
-        const answer = await ask('Réponse (laisser vide pour interrompre) : ');
+        const desktopAnswer = await requestNovaAnswer(question, session.id);
+        const answer = desktopAnswer === undefined ? await ask('Réponse (laisser vide pour interrompre) : ') : (desktopAnswer ?? '');
         if (!answer) {
           transition(session, 'PAUSED', 'L’utilisateur a interrompu la saisie de la réponse.');
           await saveSession(session);
@@ -633,6 +636,9 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         await upsertOperation(projectRoot, record);
         await saveSession(session);
         renderSummary(record.summary);
+        emitNovaEvent({ type: 'summary', sessionId: session.id, text: record.summary });
+        const patchFiles = prepared.files.map((file) => ({ path: file.path, additions: 0, deletions: 0 }));
+        emitNovaEvent({ type: 'patch-ready', sessionId: session.id, operationId, summary: record.summary, diff: response.patch!, reportPath, files: patchFiles });
         console.log(`\n${renderPatchPreview(projectRoot, prepared.files, response.patch!, reportPath)}\n`);
 
         if (options.dryRun || options.noApply) {
@@ -650,7 +656,9 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           console.log(`Patch en attente d’approbation. Applique-le avec : npm run dev -- apply --project \"${projectRoot}\"`);
           return session;
         }
-        if (!session.approvalPolicy?.write && !await approveOrReject('Appliquer ce patch ?')) {
+        const desktopPatchDecision = session.approvalPolicy?.write ? 'approve' : await requestNovaApproval({ kind: 'patch', operationId, summary: record.summary, files: patchFiles, diff: response.patch!, reportPath, sessionId: session.id });
+        const patchApproved = desktopPatchDecision === undefined ? await approveOrReject('Appliquer ce patch ?') : desktopPatchDecision !== 'reject';
+        if (!session.approvalPolicy?.write && !patchApproved) {
           record.status = 'REJECTED';
           record.errors.push('Patch explicitement refusé par l’utilisateur ; les fichiers source ne sont pas modifiés.');
           await saveReport(projectRoot, record);
@@ -667,11 +675,12 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           transition(session, stage, stage === 'RUNNING_TESTS' ? 'Exécution des tests explicitement configurés.' : 'Enregistrement de l’historique auxiliaire et du rapport.');
           await saveSession(session);
         });
-        for (const file of prepared.files) renderEvent('write', file.path);
+        for (const file of prepared.files) { renderEvent('write', file.path); emitNovaEvent({ type: 'write', sessionId: session.id, path: file.path }); }
         await saveSession(session);
         transition(session, 'DONE', 'Correction terminée.');
         await saveSession(session);
         renderDone([reportPath], projectRoot);
+        emitNovaEvent({ type: 'completed', sessionId: session.id, state: session.state });
         return session;
       }
     }
@@ -685,6 +694,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
     session.error = `${issue.code}: ${issue.message}`;
     transition(session, 'ERROR', session.error);
     await saveSession(session).catch(() => undefined);
+    emitNovaEvent({ type: 'error', sessionId: session.id, code: issue.code, message: issue.message });
     throw issue;
   } finally {
     if (provider) {
