@@ -36,6 +36,55 @@ function parseHeaderPath(line: string): string | null {
   throw new NovaError(`Chemin de patch invalide : ${line}`, 'PATCH_PATH_INVALID');
 }
 
+const HUNK_HEADER_PATTERN = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/;
+
+export function normalizePatchHunkCounts(patch: string): string {
+  const normalized = patch.replaceAll('\r\n', '\n');
+  const lines = normalized.split('\n');
+  const output = [...lines];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const header = HUNK_HEADER_PATTERN.exec(lines[index] ?? '');
+    if (!header) continue;
+
+    let end = index + 1;
+    while (end < lines.length) {
+      const candidate = lines[end]!;
+      if (candidate.startsWith('diff --git ') || HUNK_HEADER_PATTERN.test(candidate)) break;
+      end += 1;
+    }
+
+    let bodyEnd = end;
+    if (end === lines.length && normalized.endsWith('\n')) bodyEnd -= 1;
+
+    let oldCount = 0;
+    let newCount = 0;
+    for (let lineIndex = index + 1; lineIndex < bodyEnd; lineIndex += 1) {
+      const line = lines[lineIndex]!;
+      if (line.startsWith(' ')) {
+        oldCount += 1;
+        newCount += 1;
+      } else if (line.startsWith('-')) {
+        oldCount += 1;
+      } else if (line.startsWith('+')) {
+        newCount += 1;
+      } else if (line === '\\ No newline at end of file') {
+        continue;
+      } else {
+        throw new NovaError(
+          'Corps de hunk invalide à la ligne ' + (lineIndex + 1) + ': chaque ligne doit commencer par un espace, - ou +.',
+          'PATCH_HUNK_INVALID',
+        );
+      }
+    }
+
+    output[index] = '@@ -' + header[1] + ',' + oldCount + ' +' + header[2] + ',' + newCount + ' @@' + (header[3] ?? '');
+    index = end - 1;
+  }
+
+  return output.join('\n');
+}
+
 export function parsePatch(patch: string): PatchFile[] {
   if (!patch.trim()) throw new NovaError('Le patch est vide.', 'PATCH_EMPTY');
   if (/GIT binary patch|^Binary files .* differ$/m.test(patch)) throw new NovaError('Les patchs binaires ne sont pas pris en charge.', 'PATCH_BINARY_UNSUPPORTED');
