@@ -500,27 +500,10 @@ export async function sendAndReadLastAssistant(
   let previousInvalidReply = '';
   let stableInvalidReplyCount = 0;
   let anchorLogged = false;
-  let watchPoll = 0;
 
   while (Date.now() < hardDeadline && Date.now() - lastActivity < timeoutMs) {
     await throwIfAborted(page, selectors, signal);
     const anchored = await readAssistantMessagesAfterOutgoingMessage(page, selectors, expectedMessageId);
-    watchPoll += 1;
-
-    // Emit periodic snapshots so an initially empty anchor poll does not hide
-    // whether the assistant response appears later in the watch loop.
-    if (anchored.userMessageFound && watchPoll % 5 === 0) {
-      trace('browser.message.watch_poll', {
-        expectedMessageId,
-        poll: watchPoll,
-        assistantMessages: anchored.assistantTexts.length,
-        protocolCandidates: anchored.protocolTexts.length,
-        responseTurns: anchored.responseTurnTexts.length,
-        followingTurns: anchored.followingTurnTexts.length,
-        assistantCharacters: anchored.assistantTexts.reduce((total, value) => total + value.length, 0),
-        followingTurnCharacters: anchored.followingTurnTexts.reduce((total, value) => total + value.length, 0),
-      });
-    }
 
     if (anchored.userMessageFound && !anchorLogged) {
       trace('browser.message.anchor_found', {
