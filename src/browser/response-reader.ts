@@ -155,9 +155,9 @@ interface AnchoredResponseSnapshot {
 }
 
 /**
- * Locate the exact outgoing user message by its message ID, then read only assistant
- * nodes that follow it in DOM order. This prevents a previous assistant turn from
- * being mistaken for the answer to the current request.
+ * Locate the exact outgoing user message by its message ID, then read assistant
+ * nodes and conversation turns rendered below it. Geometry is used where available
+ * because a provider can reorder DOM nodes without changing visual conversation order.
  */
 async function readAssistantMessagesAfterOutgoingMessage(
   page: Page,
@@ -293,6 +293,8 @@ async function readAssistantMessagesAfterOutgoingMessage(
           const value = textOf(sibling);
           if (value && !sibling.querySelector('textarea, input, [contenteditable="true"]')) {
             followingTurnTexts.push(value);
+            const trustedTurn = sibling.matches('article, [role="article"], [data-message-id], [data-message-author-role="assistant"], [data-testid*="conversation-turn"], [data-testid*="assistant"]');
+            if (trustedTurn) responseTurnTexts.push(value);
           }
         }
       }
@@ -477,6 +479,7 @@ export async function sendAndReadLastAssistant(
         expectedMessageId,
         assistantMessagesAfterAnchor: anchored.assistantTexts.length,
         protocolCandidatesAfterAnchor: anchored.protocolTexts.length,
+        responseTurnsAfterAnchor: anchored.responseTurnTexts.length,
         followingTurnsAfterAnchor: anchored.followingTurnTexts.length,
       });
       anchorLogged = true;
