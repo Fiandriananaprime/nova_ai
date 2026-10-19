@@ -1,0 +1,29 @@
+appId: com.xvortex.novaagent
+productName: Nova Agent
+directories:
+  output: release
+files:
+  - electron/**/*
+  - dist/**/*
+  - package.json
+  - node_modules/**/*
+asar: true
+asarUnpack:
+  - node_modules/playwright/**/*
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Nova-Agent-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Nova Agent
+publish:
+  provider: github
+  owner: Fiandriananaprime
+  repo: nova_ai
