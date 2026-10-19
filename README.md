@@ -390,7 +390,7 @@ Au premier démarrage, l'application vérifie si le CLI global `@xvortex/nova-ag
 npm run desktop:dist
 ```
 
-L'installateur Windows NSIS est créé dans `release/ Nova-Agent-Setup-<version>.exe` (sans espace après `release/`). Le workflow GitHub Actions `.github/workflows/desktop-ci.yml` compile le projet, exécute les tests et publie l'installateur comme artefact lorsque le build réussit.
+L'installateur Windows NSIS est créé dans `release/Nova-Agent-Setup-<version>.exe`. Le workflow GitHub Actions `.github/workflows/desktop-ci.yml` compile le projet, exécute les tests et publie l'installateur comme artefact lorsque le build réussit.
 
 ### Mises à jour
 
