@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractProtocolResponse, extractProtocolResponseAfterOutgoingMessage } from '../src/browser/response-reader.js';
+import { extractProtocolResponse, extractProtocolResponseAfterOutgoingMessage, selectResponseCandidates } from '../src/browser/response-reader.js';
 
 const reply = (extra: Record<string, unknown> = {}, id = 'msg-2') => JSON.stringify({
   protocol: 'nova-agent/1', status: 'DONE', acknowledgedMessageId: id, ...extra,
@@ -22,6 +22,13 @@ describe('extractProtocolResponse', () => {
 
     expect(JSON.parse(result).acknowledgedMessageId).toBe('msg-2');
     expect(extractProtocolResponseAfterOutgoingMessage([staleReply], 'msg-2')).toBe('');
+  });
+
+  it('never invokes unanchored page fallback after the outgoing message is located', async () => {
+    const fallback = async () => ['{"protocol":"nova-agent/1","status":"FILE_RECEIVED","acknowledgedMessageId":"msg-2","patch":"<unified git patch>"}'];
+    const result = await selectResponseCandidates(true, [], fallback);
+
+    expect(result).toEqual([]);
   });
 
   it('finds the reply when "protocol" is not the first key and nested objects come before it', () => {
