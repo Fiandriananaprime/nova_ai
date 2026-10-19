@@ -91,24 +91,6 @@ async function readPageText(page: Page, timeout?: number): Promise<string> {
   return page.locator('body').innerText(timeout ? { timeout } : undefined).catch(() => '');
 }
 
-async function readPageAssistantText(page: Page, selectors: WebProviderSelectors): Promise<string> {
-  const userSelectors = selectors.userMessage
-    ? Array.isArray(selectors.userMessage) ? selectors.userMessage : [selectors.userMessage]
-    : [];
-  if (!userSelectors.length) return '';
-  for (const selector of ['main', 'body']) {
-    const text = await page.locator(selector).evaluate((element, excludedSelectors) => {
-      const copy = element.cloneNode(true) as HTMLElement;
-      for (const excludedSelector of excludedSelectors) {
-        copy.querySelectorAll(excludedSelector).forEach((node) => node.remove());
-      }
-      return copy.innerText;
-    }, userSelectors).catch(() => '');
-    if (text.trim()) return text;
-  }
-  return '';
-}
-
 /**
  * Read newly added assistant nodes, then the latest assistant node (for virtualised chat
  * lists), then a page-text fallback with user-message nodes removed. The fallback preserves
@@ -119,7 +101,6 @@ async function readResponseCandidates(
   page: Page,
   assistant: Locator | undefined,
   beforeAssistantCount: number,
-  selectors: WebProviderSelectors,
 ): Promise<string[]> {
   const candidates: string[] = [];
   if (assistant) {
@@ -137,8 +118,6 @@ async function readResponseCandidates(
       if (latest.trim()) candidates.push(latest);
     }
   }
-  const pageText = await readPageAssistantText(page, selectors);
-  if (pageText.trim()) candidates.push(pageText);
   return candidates;
 }
 
@@ -222,9 +201,9 @@ async function readAssistantMessagesAfterOutgoingMessage(
       .filter(Boolean)
       .slice(-5);
 
-    // If the provider selector identifies the whole user bubble, also inspect rendered
-    // protocol-bearing elements after it. This covers DOM changes where the assistant
-    // selector stops matching once generation finishes.
+    // Only scan protocol-bearing nodes after a provider-matched user bubble. A generic
+    // fallback anchor can be a descendant of the prompt itself, whose remaining text may
+    // contain protocol examples rather than an assistant reply.
     let protocolTexts: string[] = [];
     if (matchedUserSelector) {
       const hasProtocolFields = (element: Element): boolean => {
@@ -409,9 +388,11 @@ export async function sendAndReadLastAssistant(
       ...anchored.assistantTexts.slice().reverse(),
       ...anchored.protocolTexts.slice().reverse(),
     ];
-    const candidates = anchoredCandidates.length > 0
+    // Once the outgoing message is located, only inspect nodes after that anchor.
+    // Whole-page text can include JSON examples from the user's own prompt.
+    const candidates = anchored.userMessageFound
       ? anchoredCandidates
-      : await readResponseCandidates(page, assistant, beforeAssistantCount, selectors);
+      : await readResponseCandidates(page, assistant, beforeAssistantCount);
     const latestAssistantText = anchored.userMessageFound
       ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? ''
       : assistant
