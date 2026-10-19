@@ -90,6 +90,8 @@ kbd { padding: 2px 4px; border: 1px solid #3a3b42; border-radius: 4px; color: #7
 .message.assistant .message-content, .message.error .message-content { padding: 3px 0; }
 .message-title { margin: 2px 0 6px; color: #aeb0b8; font-size: 10px; font-weight: 700; letter-spacing: .25px; }
 .message-body { color: #d0d1d7; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; white-space: normal; }
+.message-expand { margin-top: 5px; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 10px; cursor: pointer; }
+.message-expand:hover { text-decoration: underline; }
 .message.user .message-body { color: #e4e5e9; }
 .message.error .message-avatar, .message.error .message-title { color: var(--red); }
 .activity { align-self: flex-start; display: flex; align-items: center; gap: 8px; max-width: 90%; padding: 1px 0 1px 35px; color: #777a83; font: 10px/1.5 var(--mono); overflow-wrap: anywhere; }

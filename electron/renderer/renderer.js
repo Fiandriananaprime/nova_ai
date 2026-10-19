@@ -71,13 +71,30 @@ function renderTree(files) {
   }));
 }
 
-function addMessage(role, title, body) {
+function addMessage(role, title, body, { expandable = false } = {}) {
   $('welcome').classList.add('hidden');
   const message = document.createElement('article');
   message.className = `message ${role}`;
   const avatar = role === 'user' ? '' : '<div class="message-avatar" aria-hidden="true">N</div>';
   const heading = title ? `<div class="message-title">${esc(title)}</div>` : '';
-  message.innerHTML = `${avatar}<div class="message-content">${heading}<div class="message-body">${esc(body).replace(/\n/g, '<br>')}</div></div>`;
+  const fullBody = String(body ?? '');
+  const collapsed = expandable && fullBody.length > 700;
+  const displayedBody = collapsed ? `${fullBody.slice(0, 700).trimEnd()}…` : fullBody;
+  message.innerHTML = `${avatar}<div class="message-content">${heading}<div class="message-body">${esc(displayedBody).replace(/\n/g, '<br>')}</div></div>`;
+  if (collapsed) {
+    const expandButton = document.createElement('button');
+    expandButton.className = 'message-expand';
+    expandButton.type = 'button';
+    expandButton.textContent = 'Développer';
+    expandButton.setAttribute('aria-expanded', 'false');
+    expandButton.addEventListener('click', () => {
+      const expanded = expandButton.getAttribute('aria-expanded') === 'true';
+      message.querySelector('.message-body').innerHTML = esc(expanded ? `${fullBody.slice(0, 700).trimEnd()}…` : fullBody).replace(/\n/g, '<br>');
+      expandButton.textContent = expanded ? 'Développer' : 'Réduire';
+      expandButton.setAttribute('aria-expanded', String(!expanded));
+    });
+    message.querySelector('.message-content').append(expandButton);
+  }
   $('conversation').append(message);
   $('conversation').scrollTop = $('conversation').scrollHeight;
   return message;
@@ -173,7 +190,7 @@ window.novaDesktop.onEvent(event => {
   if (event.type === 'activity') { addActivity(event.text); setStatus(event.text, state.running); }
   if (event.type === 'read') { addActivity(`Read ${event.path}`); setStatus(`Read ${event.path}`, state.running); }
   if (event.type === 'write') { addActivity(`Write ${event.path}`); setStatus(`Write ${event.path}`, state.running); renderTree(state.files); }
-  if (event.type === 'summary') addMessage('assistant', 'Nova', event.text);
+  if (event.type === 'summary') addMessage('assistant', 'Nova', event.text, { expandable: true });
   if (event.type === 'patch-ready') {
     state.pendingPatch = event;
     for (const file of event.files || []) updateChange(file.path, { ...file, diff: event.diff });

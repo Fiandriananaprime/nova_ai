@@ -148,6 +148,8 @@ async function readRequestedFile(
 
 const MAX_LINES_PER_FILE_CHUNK = 300;
 const MAX_BYTES_PER_FILE_CHUNK = 12 * 1024;
+const MAX_PROTOCOL_REPAIR_ATTEMPTS = 2;
+const REPAIRABLE_RESPONSE_CODES = new Set(['AI_JSON_INVALID', 'AI_PROTOCOL_INVALID', 'AI_MESSAGE_ACK_INVALID']);
 
 interface FileChunk { content: string; firstLine: number; lastLine: number; lineCount: number; }
 
@@ -214,7 +216,7 @@ function getFileChunk(content: string, index: number): { content: string; total:
 }
 
 function fileDeliveryMessage(filePath: string, chunkIndex: number, chunkTotal: number, firstLine: number, lastLine: number, lineCount: number): string {
-  return `Envoi du segment ${chunkIndex}/${chunkTotal} du fichier ${filePath} (lignes ${firstLine}-${lastLine} sur ${lineCount}, maximum ${MAX_LINES_PER_FILE_CHUNK} lignes et ${MAX_BYTES_PER_FILE_CHUNK} octets par segment). Le contenu est dans files. Si tu as assez de contenu, tu peux arrêter le transfert maintenant avec {"protocol":"nova-agent/1","status":"TRANSFER_STOP","receivedFile":"${filePath}","chunkIndex":${chunkIndex},"transferReason":"..."}. Sinon, réponds avec FILE_RECEIVED pour demander le segment suivant. Ne demande jamais le même segment deux fois.`;
+  return `Envoi du segment ${chunkIndex}/${chunkTotal} du fichier ${filePath} (lignes ${firstLine}-${lastLine} sur ${lineCount}, maximum ${MAX_LINES_PER_FILE_CHUNK} lignes et ${MAX_BYTES_PER_FILE_CHUNK} octets par segment). Le contenu est dans files. Apres reception, tu DOIS repondre avec status FILE_RECEIVED et les valeurs exactes de receivedFile et chunkIndex. Si une autre action est deja prete, indique-la aussi avec nextStatus et ses champs requis dans ce meme JSON. Si tu as assez de contenu et aucune autre action prete, indique nextStatus TRANSFER_STOP et transferReason. Sinon, garde FILE_RECEIVED comme status principal et demande le segment suivant. Ne demande jamais le même segment deux fois.`;
 }
 
 async function readTransferFile(projectRoot: string, filePath: string, session: PersistedSession, maxBytes: number): Promise<ProjectFile> {
@@ -334,28 +336,58 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.forceInitialPrompt && session.cycle === 1 ? { forceInitialPrompt: true } : {}),
       };
+      const deliveredFiles = request.files ?? [];
       session.pendingMessage = nextMessage;
       session.pendingFilePaths = outgoingFiles.map((file) => file.path);
       session.generalPromptSent = true;
+      if (session.fileTransferActive) {
+        if (session.fileTransferChunkIndex === 1) {
+          for (const file of deliveredFiles) {
+            renderEvent('read', file.path);
+            emitNovaEvent({ type: 'read', sessionId: session.id, path: file.path });
+          }
+        }
+      } else {
+        for (const file of deliveredFiles) {
+          renderEvent('read', file.path);
+          emitNovaEvent({ type: 'read', sessionId: session.id, path: file.path });
+        }
+      }
       transition(session, 'WAITING_FOR_RESPONSE', `Attente de la réponse ${session.cycle}.`);
       await saveSession(session);
-      const deliveredFiles = request.files ?? [];
       outgoingFiles = [];
       const stopThinking = startThinking();
       const stopSteeringCapture = captureInteractiveSteering(projectRoot, session.id);
       let response: AIResponse;
       try {
-        response = await provider.send(request);
+        let attempt = 0;
+        let repairRequest = request;
+        while (true) {
+          try {
+            response = await provider.send(repairRequest);
+            break;
+          } catch (error) {
+            const issue = asNovaError(error);
+            if (!REPAIRABLE_RESPONSE_CODES.has(issue.code) || attempt >= MAX_PROTOCOL_REPAIR_ATTEMPTS) throw issue;
+            attempt += 1;
+            renderStatus('PROTOCOL_REPAIR', `RÃ©ponse invalide, correction demandÃ©e (${attempt}/${MAX_PROTOCOL_REPAIR_ATTEMPTS})`);
+            const correctedRequest = {
+              ...request,
+              message: `Nova a rejetÃ© ta rÃ©ponse prÃ©cÃ©dente pour cette mÃªme requÃªte. Erreur de validation (${issue.code}) : ${issue.message}\n\nCorrige immÃ©diatement ta rÃ©ponse en renvoyant un seul objet JSON valide conforme Ã  nova-agent/1. Respecte exactement le messageId du paquet initial. Ne recommence pas l'analyse et ne redemande pas les fichiers dÃ©jÃ  reÃ§us ; corrige uniquement la forme ou les champs signalÃ©s.`,
+              projectContext: '',
+              includeGeneralPrompt: false,
+              forceInitialPrompt: false,
+            };
+            delete correctedRequest.files;
+            delete correctedRequest.tree;
+            repairRequest = correctedRequest;
+          }
+        }
       } finally {
         stopThinking();
         await stopSteeringCapture();
       }
       if (options.signal?.aborted) throw new NovaError('La tâche a été arrêtée depuis Nova Desktop.', 'SESSION_CANCELLED');
-      if (session.fileTransferActive) {
-        if (session.fileTransferChunkIndex === 1) for (const file of deliveredFiles) renderEvent('read', file.path);
-      } else {
-        for (const file of deliveredFiles) { renderEvent('read', file.path); emitNovaEvent({ type: 'read', sessionId: session.id, path: file.path }); }
-      }
       session.transmittedFileHashes = session.transmittedFileHashes ?? {};
       if (!session.fileTransferActive) {
         for (const file of request.files ?? []) session.transmittedFileHashes[file.path] = file.sha256;
@@ -382,6 +414,56 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         continue;
       }
       await saveSession(session);
+
+      if (session.fileTransferActive && response.status === 'NEED_FILES') {
+        const currentPath = session.fileTransferCurrentPath;
+        const currentHash = currentPath ? session.fileTransferHashes?.[currentPath] : undefined;
+        if (currentPath && currentHash && session.fileTransferKind === 'project-file'
+          && session.fileTransferChunkIndex === session.fileTransferChunkTotal) {
+          session.transmittedFileHashes[currentPath] = currentHash;
+        }
+        session.fileTransferActive = false;
+        delete session.fileTransferKind;
+        delete session.fileTransferCurrentPath;
+        delete session.fileTransferChunkIndex;
+        delete session.fileTransferChunkTotal;
+        delete session.fileTransferQueue;
+        delete session.fileTransferHashes;
+        delete session.fileTransferTotal;
+        delete session.fileTransferSummary;
+        outgoingFiles = [];
+      }
+
+      if (session.fileTransferActive && response.status === 'FILE_RECEIVED' && response.nextStatus) {
+        const currentPath = session.fileTransferCurrentPath;
+        const expectedChunkIndex = session.fileTransferChunkIndex ?? 1;
+        const currentHash = currentPath ? session.fileTransferHashes?.[currentPath] : undefined;
+        if (!currentPath || response.receivedFile !== currentPath || response.chunkIndex !== expectedChunkIndex) {
+          throw new NovaError('Accuse de reception invalide: Nova attendait FILE_RECEIVED pour le fichier courant.', 'FILE_TRANSFER_ACK_INVALID');
+        }
+        if (currentHash && session.fileTransferKind === 'project-file'
+          && expectedChunkIndex === session.fileTransferChunkTotal) {
+          session.transmittedFileHashes[currentPath] = currentHash;
+        }
+        session.fileTransferActive = false;
+        delete session.fileTransferKind;
+        delete session.fileTransferCurrentPath;
+        delete session.fileTransferChunkIndex;
+        delete session.fileTransferChunkTotal;
+        delete session.fileTransferQueue;
+        delete session.fileTransferHashes;
+        delete session.fileTransferTotal;
+        delete session.fileTransferSummary;
+        outgoingFiles = [];
+        if (response.nextStatus === 'TRANSFER_STOP') {
+          nextMessage = `Transfert arrete${response.transferReason ? ` (${response.transferReason})` : ''}. Les parties recues de ${currentPath} restent disponibles dans le contexte; aucun segment restant ni fichier en attente n'a ete transmis. Continue l'analyse et demande un autre fichier avec NEED_FILES si necessaire. Reponds uniquement en JSON nova-agent/1.`;
+          transition(session, 'ANALYZING_CONTEXT', 'Le fournisseur a arrete le transfert apres avoir accuse reception du segment courant.');
+          session.pendingMessage = nextMessage;
+          await saveSession(session);
+          continue;
+        }
+        response = { ...response, status: response.nextStatus, nextStatus: undefined };
+      }
 
       if (session.fileTransferActive) {
         const currentPath = session.fileTransferCurrentPath;
@@ -547,6 +629,14 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       if (response.status === 'NEED_FILES') {
         const requested = validateRequestedFiles(response, config.protocol.maxFilesPerRequest);
         renderStatus('NEED_FILES', requested.join(', '));
+        const requestSummary = response.reason?.trim() || response.summary?.trim();
+        emitNovaEvent({
+          type: 'summary',
+          sessionId: session.id,
+          text: requestSummary
+            ? `${requestSummary}\nFichiers demandés : ${requested.join(', ')}`
+            : `Il me faut aussi : ${requested.join(', ')}.`,
+        });
         const signature = [...requested].sort().join('|');
         const repeated = session.fileRequestSignatures.includes(signature);
         session.fileRequestSignatures.push(signature);

@@ -1,8 +1,0 @@
-{
-  "timestamp": "2026-10-18T17:52:33.128Z",
-  "code": "BROWSER_RESPONSE_TIMEOUT",
-  "detail": "Aucune nouvelle réponse de ChatGPT détectée. Le message peut ne pas avoir été reçu ; ne réessaie pas automatiquement pour éviter un doublon.",
-  "origin": "https://chatgpt.com",
-  "title": "omitted for privacy",
-  "pageContent": "not recorded"
-}

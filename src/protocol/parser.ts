@@ -19,6 +19,14 @@ export function parseAIResponse(raw: string, expectedMessageId?: string): AIResp
     if (error instanceof NovaError) throw error;
     throw new NovaError(`JSON invalide dans la réponse IA : ${error instanceof Error ? error.message : String(error)}`, 'AI_JSON_INVALID', { cause: error });
   }
+  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && 'nextFiles' in parsed) {
+    const response = parsed as Record<string, unknown>;
+    if ('files' in response) {
+      throw new NovaError('Ambiguous file list: use files or nextFiles, not both.', 'AI_PROTOCOL_INVALID');
+    }
+    response.files = response.nextFiles;
+    delete response.nextFiles;
+  }
   const result = AIResponseSchema.safeParse(parsed);
   if (!result.success) throw new NovaError(`Réponse incompatible avec nova-agent/1 : ${result.error.issues.map((issue: { message: string }) => issue.message).join('; ')}`, 'AI_PROTOCOL_INVALID');
   if (expectedMessageId && result.data.acknowledgedMessageId !== expectedMessageId) {
