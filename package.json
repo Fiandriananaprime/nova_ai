@@ -1,5 +1,5 @@
 {
-  "name": "nova-agent",
+  "name": "@xvortex/nova-agent",
   "version": "0.5.0",
   "description": "Agent IA local de développement piloté par CLI, Edge et patchs validés",
   "type": "module",
