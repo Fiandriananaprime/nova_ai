@@ -25,6 +25,9 @@ export const CLAUDE_SELECTORS: WebProviderSelectors = {
     'button[aria-label*="Arrêter"]',
     'button[data-testid*="stop"]',
   ],
+  // Best-effort hints, unverified against the live UI. The reader falls back to the page text when they match nothing.
+  assistantMessage: '[data-is-streaming]',
+  userMessage: '[data-testid="user-message"]',
 };
 
 export const GEMINI_SELECTORS: WebProviderSelectors = {
@@ -45,4 +48,7 @@ export const GEMINI_SELECTORS: WebProviderSelectors = {
     'button[aria-label*="Arrêter"]',
     'button[data-testid*="stop"]',
   ],
+  // Best-effort hints, unverified against the live UI. The reader falls back to the page text when they match nothing.
+  assistantMessage: 'model-response',
+  userMessage: 'user-query',
 };
