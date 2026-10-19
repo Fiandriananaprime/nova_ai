@@ -9,6 +9,6 @@ export async function prepareAndStorePatch(projectRoot: string, patch: string, f
   const prepared = await validatePatch(projectRoot, patch, fileHashes, maxBytes);
   const relativePath = path.posix.join('.nova_agents', 'patches', `${operationId}.patch`);
   const absolutePath = path.join(projectRoot, '.nova_agents', 'patches', `${operationId}.patch`);
-  await writeAtomic(absolutePath, patch);
+  await writeAtomic(absolutePath, prepared.diff);
   return { id: operationId, relativePath, absolutePath, prepared };
 }
