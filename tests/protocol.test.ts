@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseAIResponse } from '../src/protocol/parser.js';
+import { buildProviderMessage } from '../src/protocol/prompts.js';
 import { validateRequestedFiles } from '../src/protocol/validator.js';
 import { parsePatch } from '../src/patches/parser.js';
 
@@ -25,6 +26,25 @@ describe('protocol parser', () => {
     expect(validateRequestedFiles(response, 5)).toEqual(['src/auth.ts']);
     const traversal = parseAIResponse(JSON.stringify({ protocol, acknowledgedMessageId: 'msg-1', status: 'NEED_FILES', files: ['../.env'] }));
     expect(() => validateRequestedFiles(traversal, 5)).toThrow();
+  });
+});
+
+describe('provider prompt construction', () => {
+  it('does not replace the example acknowledgement placeholder with the live message ID', () => {
+    const messageId = 'current-message-123';
+    const prompt = buildProviderMessage({
+      taskId: 'task-1',
+      messageId,
+      message: 'hello',
+      projectContext: 'test context',
+      includeGeneralPrompt: true,
+    });
+    const exampleStart = prompt.indexOf('Example:');
+    const exampleEnd = prompt.indexOf(' A file transfer', exampleStart);
+    const example = prompt.slice(exampleStart, exampleEnd < 0 ? undefined : exampleEnd);
+
+    expect(example).toContain('"acknowledgedMessageId":"<current messageId>"');
+    expect(example).not.toContain('"acknowledgedMessageId":"current-message-123"');
   });
 });
 
