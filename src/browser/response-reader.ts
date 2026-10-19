@@ -611,7 +611,7 @@ export async function sendAndReadLastAssistant(
       if (Buffer.byteLength(text, 'utf8') > maxResponseBytes) {
         throw new NovaError(`Réponse du fournisseur trop volumineuse (limite ${maxResponseBytes} octets).`, 'AI_RESPONSE_TOO_LARGE');
       }
-      trace('browser.assistant.protocol_selected', { expectedMessageId, response: text, stableCount, stopVisible: stop });
+      trace('browser.assistant.protocol_selected', { expectedMessageId, responseBytes: Buffer.byteLength(text, 'utf8'), stableCount, stopVisible: stop });
       return text;
     }
 
@@ -633,6 +633,6 @@ export async function sendAndReadLastAssistant(
     trace('browser.assistant.response_missing', { expectedMessageId, unacknowledgedMessageId });
     throw new NovaError('Le message a été envoyé, mais aucune nouvelle réponse détectable n’est apparue. Vérifie Edge avant toute nouvelle tentative.', 'BROWSER_RESPONSE_TIMEOUT');
   }
-  trace('browser.assistant.response_truncated', { expectedMessageId, previousResponse: previous });
+  trace('browser.assistant.response_truncated', { expectedMessageId, previousResponseBytes: Buffer.byteLength(previous, 'utf8') });
   throw new NovaError('La réponse ChatGPT semble tronquée ou la génération n’a pas pris fin.', 'BROWSER_RESPONSE_TRUNCATED');
 }
