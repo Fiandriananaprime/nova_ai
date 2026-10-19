@@ -226,11 +226,15 @@ async function readAssistantMessagesAfterOutgoingMessage(
       const followsInDom = Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)
         && !Boolean(position & Node.DOCUMENT_POSITION_CONTAINED_BY);
       const candidateHasRect = element.getClientRects().length > 0;
+      // Conversation DOM order is the primary source of truth. ChatGPT can place
+      // messages in nested/scrolling containers whose viewport geometry does not
+      // reflect their conversation order; geometry must not hide a later DOM turn.
+      if (followsInDom) return true;
       if (outgoingHasRect && candidateHasRect) {
         const candidateRect = element.getBoundingClientRect();
         return candidateRect.top >= outgoingRect.bottom - 12;
       }
-      return followsInDom;
+      return false;
     };
     // Provider-specific selectors can be transient (for example, a streaming-only
     // selector disappears as soon as generation finishes). Include semantic and common
