@@ -150,6 +150,7 @@ interface AnchoredResponseSnapshot {
   userMessageFound: boolean;
   assistantTexts: string[];
   protocolTexts: string[];
+  responseTurnTexts: string[];
   followingTurnTexts: string[];
 }
 
@@ -212,13 +213,24 @@ async function readAssistantMessagesAfterOutgoingMessage(
       genericMatches.sort((left, right) => textOf(left).length - textOf(right).length);
       outgoing = genericMatches[0];
     }
-    if (!outgoing) return { userMessageFound: false, assistantTexts: [], protocolTexts: [], followingTurnTexts: [] };
+    if (!outgoing) return { userMessageFound: false, assistantTexts: [], protocolTexts: [], responseTurnTexts: [], followingTurnTexts: [] };
 
+    // DOM order is not always visual order: some chat layouts reorder turns with CSS.
+    // Prefer geometry after the exact outgoing bubble, falling back to DOM order only
+    // when geometry is unavailable. This prevents missing an answer rendered below it.
+    const outgoingRect = outgoing.getBoundingClientRect();
+    const outgoingHasRect = outgoing.getClientRects().length > 0;
     const followsOutgoingMessage = (element: Element): boolean => {
-      if (element === outgoing || outgoing!.contains(element)) return false;
+      if (element === outgoing || outgoing!.contains(element) || element.contains(outgoing!)) return false;
       const position = outgoing!.compareDocumentPosition(element);
-      return Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)
+      const followsInDom = Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)
         && !Boolean(position & Node.DOCUMENT_POSITION_CONTAINED_BY);
+      const candidateHasRect = element.getClientRects().length > 0;
+      if (outgoingHasRect && candidateHasRect) {
+        const candidateRect = element.getBoundingClientRect();
+        return candidateRect.top >= outgoingRect.bottom - 12;
+      }
+      return followsInDom;
     };
     // Provider-specific selectors can be transient (for example, a streaming-only
     // selector disappears as soon as generation finishes). Include semantic and common
@@ -235,15 +247,18 @@ async function readAssistantMessagesAfterOutgoingMessage(
     ];
     const assistantTexts = queryNodes(allAssistantSelectors)
       .filter(followsOutgoingMessage)
+      .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)
       .map(textOf)
       .filter(Boolean)
       .slice(-12);
 
     // Prefer actual conversation-turn containers. They may not be direct siblings of the
     // selected user bubble, depending on ChatGPT's current nested DOM structure.
+    let responseTurnTexts: string[] = [];
     let followingTurnTexts: string[] = [];
     const turnSelector = '[data-testid^="conversation-turn-"], [data-testid*="conversation-turn"]';
-    const conversationTurns = queryNodes([turnSelector]);
+    const conversationTurns = queryNodes([turnSelector])
+      .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
     const outgoingConversationTurn = conversationTurns
       .filter((turn) => turn === outgoing || turn.contains(outgoing))
       .sort((left, right) => textOf(left).length - textOf(right).length)[0];
@@ -260,16 +275,20 @@ async function readAssistantMessagesAfterOutgoingMessage(
       if (options.userSelectors.length && (turn.matches(options.userSelectors.join(',')) || turn.querySelector(options.userSelectors.join(',')))) break;
       const value = textOf(turn);
       if (value && !turn.querySelector('textarea, input, [contenteditable="true"]')) {
+        responseTurnTexts.push(value);
         followingTurnTexts.push(value);
       }
     }
-    // Fallback for providers that do not expose conversation-turn containers.
+    // Fallback for providers that do not expose conversation-turn containers. Use
+    // visual position instead of slicing only DOM-following siblings, then sort visually.
     if (!followingTurnTexts.length) {
       const parent = outgoingTurn.parentElement;
       if (parent) {
-        const siblings = Array.from(parent.children);
-        const anchorIndex = siblings.indexOf(outgoingTurn);
-        for (const sibling of siblings.slice(anchorIndex + 1, anchorIndex + 6)) {
+        const siblings = Array.from(parent.children)
+          .filter((sibling) => sibling !== outgoingTurn && followsOutgoingMessage(sibling))
+          .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)
+          .slice(0, 6);
+        for (const sibling of siblings) {
           if (options.userSelectors.length && (sibling.matches(options.userSelectors.join(',')) || sibling.querySelector(options.userSelectors.join(',')))) break;
           const value = textOf(sibling);
           if (value && !sibling.querySelector('textarea, input, [contenteditable="true"]')) {
@@ -299,7 +318,7 @@ async function readAssistantMessagesAfterOutgoingMessage(
         .slice(-12);
     }
 
-    return { userMessageFound: true, assistantTexts, protocolTexts, followingTurnTexts };
+    return { userMessageFound: true, assistantTexts, protocolTexts, responseTurnTexts, followingTurnTexts };
   }, { userSelectors, assistantSelectors, expectedMessageId });
 }
 
@@ -476,18 +495,18 @@ export async function sendAndReadLastAssistant(
       () => readResponseCandidates(page, assistant, beforeAssistantCount),
     );
     const latestAssistantText = anchored.userMessageFound
-      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? ''
+      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? anchored.responseTurnTexts.at(-1) ?? ''
       : assistant
         ? await assistant.last().innerText({ timeout: 1000 }).catch(() => '')
         : '';
     const latestCandidateText = anchored.userMessageFound
-      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? anchored.followingTurnTexts.at(-1) ?? ''
+      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? anchored.responseTurnTexts.at(-1) ?? anchored.followingTurnTexts.at(-1) ?? ''
       : latestAssistantText;
     const candidateChanged = Boolean(latestCandidateText.trim())
       && latestCandidateText !== beforeLatestAssistantText;
     const assistantReplyChanged = Boolean(latestAssistantText.trim())
       && latestAssistantText !== beforeLatestAssistantText;
-    const hasDedicatedAssistantNode = Boolean(latestAssistantText.trim());
+    const hasDedicatedAssistantNode = Boolean(anchored.assistantTexts.at(-1)?.trim() || anchored.protocolTexts.at(-1)?.trim() || anchored.responseTurnTexts.at(-1)?.trim() || latestAssistantText.trim());
     const credibleInvalidReply = isCredibleInvalidReplyCandidate(latestAssistantText, hasDedicatedAssistantNode);
     let text = anchored.userMessageFound
       ? extractProtocolResponseAfterOutgoingMessage(anchored.assistantTexts, expectedMessageId)
