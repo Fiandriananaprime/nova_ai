@@ -520,6 +520,8 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         && (!response.receivedFile?.trim() || !response.chunkIndex)) {
         const currentPath = session.fileTransferCurrentPath;
         const expectedChunkIndex = session.fileTransferChunkIndex ?? 1;
+        const missingPath = !response.receivedFile?.trim();
+        const missingChunkIndex = !response.chunkIndex;
         const hasConflictingPath = Boolean(response.receivedFile?.trim() && response.receivedFile !== currentPath);
         const hasConflictingChunk = Boolean(response.chunkIndex && response.chunkIndex !== expectedChunkIndex);
         if (!hasConflictingPath && !hasConflictingChunk) {
@@ -531,8 +533,8 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           logger.record('file_transfer.stop_metadata_recovered', {
             path: currentPath,
             chunkIndex: expectedChunkIndex,
-            missingPath: !response.receivedFile?.trim(),
-            missingChunkIndex: !response.chunkIndex,
+            missingPath,
+            missingChunkIndex,
           });
         }
       }
