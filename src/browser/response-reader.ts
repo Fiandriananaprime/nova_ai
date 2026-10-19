@@ -172,6 +172,8 @@ async function readAssistantMessagesAfterOutgoingMessage(
     : [];
 
   return page.locator('body').evaluate((body, options) => {
+    // page.evaluate runs in the browser context and cannot access module-scope constants.
+    const maxAssistantNodesRead = 5;
     const main = body.querySelector('main');
     const root = main ?? body;
     const scopes: ParentNode[] = root === body ? [body] : [root, body];
@@ -272,7 +274,7 @@ async function readAssistantMessagesAfterOutgoingMessage(
     const assistantTexts = assistantNodes
       .map(textOf)
       .filter(Boolean)
-      .slice(-MAX_ASSISTANT_NODES_READ);
+      .slice(-maxAssistantNodesRead);
 
     // Prefer actual conversation-turn containers. They may not be direct siblings of the
     // selected user bubble, depending on ChatGPT's current nested DOM structure.
