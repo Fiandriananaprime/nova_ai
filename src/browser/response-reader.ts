@@ -18,6 +18,8 @@ async function throwIfAborted(page: Page, selectors: WebProviderSelectors, signa
 const STABLE_POLLS_WITH_STOP_VISIBLE = 6;
 /** Consecutive polls showing a reply for another message id before failing fast instead of waiting for the timeout. */
 const STABLE_POLLS_FOR_WRONG_ACK = 4;
+/** A stable non-protocol answer is invalid; even a stuck stop control cannot make Nova wait forever. */
+const STABLE_POLLS_INVALID_REPLY_WITH_STOP = 10;
 /** Max assistant nodes read per poll, newest first, to keep each poll cheap. */
 const MAX_ASSISTANT_NODES_READ = 5;
 /** Max `{` positions tried before one `"protocol"` key (the key is not always the first one in the object). */
@@ -135,6 +137,7 @@ interface AnchoredResponseSnapshot {
   userMessageFound: boolean;
   assistantTexts: string[];
   protocolTexts: string[];
+  followingTurnTexts: string[];
 }
 
 /**
@@ -196,7 +199,7 @@ async function readAssistantMessagesAfterOutgoingMessage(
       genericMatches.sort((left, right) => textOf(left).length - textOf(right).length);
       outgoing = genericMatches[0];
     }
-    if (!outgoing) return { userMessageFound: false, assistantTexts: [], protocolTexts: [] };
+    if (!outgoing) return { userMessageFound: false, assistantTexts: [], protocolTexts: [], followingTurnTexts: [] };
 
     const followsOutgoingMessage = (element: Element): boolean => {
       if (element === outgoing || outgoing!.contains(element)) return false;
@@ -204,11 +207,45 @@ async function readAssistantMessagesAfterOutgoingMessage(
       return Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)
         && !Boolean(position & Node.DOCUMENT_POSITION_CONTAINED_BY);
     };
-    const assistantTexts = queryNodes(options.assistantSelectors)
+    // Provider-specific selectors can be transient (for example, a streaming-only
+    // selector disappears as soon as generation finishes). Include semantic and common
+    // rendered-response selectors as independent fallbacks.
+    const allAssistantSelectors = [
+      ...options.assistantSelectors,
+      '[data-message-author-role="assistant"]',
+      '[data-message-author-role="model"]',
+      '[data-is-streaming]',
+      'model-response',
+      '[data-testid*="assistant"]',
+      '[data-testid*="response"]',
+      '.markdown',
+    ];
+    const assistantTexts = queryNodes(allAssistantSelectors)
       .filter(followsOutgoingMessage)
       .map(textOf)
       .filter(Boolean)
-      .slice(-5);
+      .slice(-12);
+
+    // Also inspect the conversation turn immediately after the anchored user turn.
+    // This handles providers whose rendered assistant content has no stable role selector.
+    let followingTurnTexts: string[] = [];
+    const turnSelector = '[data-testid^="conversation-turn-"], [data-testid*="conversation-turn"]';
+    const outgoingTurn = outgoing!.closest(turnSelector)
+      ?? outgoing!.closest('article')
+      ?? outgoing!.closest('[data-message-id]')
+      ?? outgoing!;
+    const parent = outgoingTurn.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children);
+      const anchorIndex = siblings.indexOf(outgoingTurn);
+      for (const sibling of siblings.slice(anchorIndex + 1, anchorIndex + 6)) {
+        if (options.userSelectors.length && sibling.querySelector(options.userSelectors.join(','))) break;
+        const value = textOf(sibling);
+        if (value && !sibling.querySelector('textarea, input, [contenteditable="true"]')) {
+          followingTurnTexts.push(value);
+        }
+      }
+    }
 
     // Only scan protocol-bearing nodes after a provider-matched user bubble. A generic
     // fallback anchor can be a descendant of the prompt itself, whose remaining text may
@@ -227,10 +264,10 @@ async function readAssistantMessagesAfterOutgoingMessage(
       protocolTexts = (leafNodes.length ? leafNodes : protocolNodes)
         .map(textOf)
         .filter(Boolean)
-        .slice(-5);
+        .slice(-12);
     }
 
-    return { userMessageFound: true, assistantTexts, protocolTexts };
+    return { userMessageFound: true, assistantTexts, protocolTexts, followingTurnTexts };
   }, { userSelectors, assistantSelectors, expectedMessageId });
 }
 
@@ -389,6 +426,7 @@ export async function sendAndReadLastAssistant(
         expectedMessageId,
         assistantMessagesAfterAnchor: anchored.assistantTexts.length,
         protocolCandidatesAfterAnchor: anchored.protocolTexts.length,
+        followingTurnsAfterAnchor: anchored.followingTurnTexts.length,
       });
       anchorLogged = true;
     }
@@ -396,6 +434,7 @@ export async function sendAndReadLastAssistant(
     const anchoredCandidates = [
       ...anchored.assistantTexts.slice().reverse(),
       ...anchored.protocolTexts.slice().reverse(),
+      ...anchored.followingTurnTexts.slice().reverse(),
     ];
     // Once the outgoing message is located, only inspect nodes after that anchor.
     // Whole-page text can include JSON examples from the user's own prompt.
@@ -405,7 +444,7 @@ export async function sendAndReadLastAssistant(
       () => readResponseCandidates(page, assistant, beforeAssistantCount),
     );
     const latestAssistantText = anchored.userMessageFound
-      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? ''
+      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? anchored.followingTurnTexts.at(-1) ?? ''
       : assistant
         ? await assistant.last().innerText({ timeout: 1000 }).catch(() => '')
         : '';
@@ -437,25 +476,32 @@ export async function sendAndReadLastAssistant(
     responseStarted ||= Boolean(text);
     const stop = Boolean(await findFirstVisible(page, selectors.stopButton));
 
-    // A completed assistant turn that changed but contains no protocol object is
-    // a protocol violation. Return it to the orchestrator so it can ask the model
-    // to correct the same request instead of waiting for the full response timeout.
-    if (!text && assistantReplyChanged && !stop) {
+    // A stable non-protocol answer must trigger the existing protocol-repair path.
+    // Do not rely only on the stop button: some provider UIs leave it stuck visible.
+    if (!text && assistantReplyChanged) {
       if (latestAssistantText === previousInvalidReply) stableInvalidReplyCount += 1;
       else {
         previousInvalidReply = latestAssistantText;
         stableInvalidReplyCount = 1;
       }
-      if (stableInvalidReplyCount >= 3) {
-        throw new NovaError('Réponse incompatible avec nova-agent/1 : aucun objet JSON de protocole valide détecté.', 'AI_PROTOCOL_INVALID');
+      if (stableInvalidReplyCount >= 3 && !stop || stableInvalidReplyCount >= STABLE_POLLS_INVALID_REPLY_WITH_STOP) {
+        trace('browser.assistant.invalid_reply_stable', {
+          expectedMessageId,
+          stableInvalidReplyCount,
+          stopVisible: stop,
+          replyCharacters: latestAssistantText.length,
+        });
+        throw new NovaError('Réponse incompatible avec nova-agent/1 : une réponse assistant est apparue, mais aucun objet JSON de protocole valide ne correspond à la demande.', 'AI_PROTOCOL_INVALID');
       }
     } else {
       previousInvalidReply = '';
       stableInvalidReplyCount = 0;
     }
 
-    const signature = `${candidates[0]?.length ?? 0}:${text.length}`;
-    if (stop || signature !== lastSignature) lastActivity = Date.now();
+    // Track actual rendered content, not merely the stop-button visibility. Some sites
+    // leave a stale stop control in the DOM; that must never extend the wait indefinitely.
+    const signature = `${candidates.map((candidate) => candidate.length).join(',')}:${candidates.join('').slice(-4000)}:${text.length}:${stop}`;
+    if (signature !== lastSignature) lastActivity = Date.now();
     lastSignature = signature;
 
     // The provider can briefly expose the previous assistant turn after submission.
