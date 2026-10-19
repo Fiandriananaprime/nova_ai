@@ -49,6 +49,15 @@ describe('patch validation and reversible application', () => {
     await expect(validatePatch(root, patch, {})).rejects.toThrow(/n'a pas été explicitement lu/i);
   });
 
+  it('repairs incorrect unified-diff hunk counts before git validation', async () => {
+    const { hash } = await setup();
+    const patch = patchFor('src/value.ts', 'export const value = 1;', 'export const value = 2;')
+      .replace('@@ -1 +1 @@', '@@ -1,99 +1,99 @@');
+    const prepared = await validatePatch(root, patch, { 'src/value.ts': hash });
+    expect(prepared.diff).toContain('@@ -1,1 +1,1 @@');
+    expect(prepared.diff).not.toContain('@@ -1,99 +1,99 @@');
+  });
+
   it('rejects attempts to patch ignored files', async () => {
     const { hash } = await setup();
     const patch = patchFor('.env', 'password=x', 'password=y');
