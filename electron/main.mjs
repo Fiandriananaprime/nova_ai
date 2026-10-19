@@ -9,6 +9,7 @@ import { ensureProjectInitialized } from '../dist/context/project-setup.js';
 import { refreshTree } from '../dist/context/tree.js';
 import { loadConfig } from '../dist/config/loader.js';
 import { NOVA_VERSION } from '../dist/version.js';
+import { autoUpdater } from 'electron-updater';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -85,6 +86,15 @@ function createWindow() {
 }
 app.whenReady().then(async () => {
   createWindow();
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('checking-for-update', () => send('nova:update-status', { state: 'checking' }));
+  autoUpdater.on('update-available', info => send('nova:update-status', { state: 'available', version: info.version }));
+  autoUpdater.on('update-not-available', info => send('nova:update-status', { state: 'current', version: info.version }));
+  autoUpdater.on('download-progress', progress => send('nova:update-status', { state: 'downloading', percent: Math.round(progress.percent) }));
+  autoUpdater.on('update-downloaded', info => send('nova:update-status', { state: 'downloaded', version: info.version }));
+  autoUpdater.on('error', error => send('nova:update-status', { state: 'error', message: error.message }));
+  if (app.isPackaged) void autoUpdater.checkForUpdates().catch(error => send('nova:update-status', { state: 'error', message: error.message }));
   await installGlobalCli();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
@@ -118,7 +128,7 @@ ipcMain.handle('nova:run-task', async (_event, input) => {
   try {
     const config = await loadConfig(projectRoot);
     const providerId = input.providerId || config.defaultProvider;
-    const session = await runFix({ projectRoot, problem: input.problem.trim(), providerId, noApply: true, callbacks: {
+    const session = await runFix({ projectRoot, problem: input.problem.trim(), providerId, noApply: false, callbacks: {
       onEvent: event => send('nova:event', event),
       requestApproval: askApproval,
       requestAnswer: askAnswer,
@@ -140,4 +150,7 @@ ipcMain.handle('nova:answer', async (_event, input) => {
 });
 ipcMain.handle('nova:open-external', async (_event, value) => { await shell.openExternal(safeExternalUrl(value)); return { ok: true }; });
 ipcMain.handle('nova:install-cli', async () => installGlobalCli());
+ipcMain.handle('nova:check-updates', async () => { if (!app.isPackaged) return { state: 'dev-build' }; const result = await autoUpdater.checkForUpdates(); return { state: result?.updateInfo ? 'checked' : 'checking', version: result?.updateInfo?.version }; });
+ipcMain.handle('nova:download-update', async () => { await autoUpdater.downloadUpdate(); return { ok: true }; });
+ipcMain.handle('nova:install-update', async () => { autoUpdater.quitAndInstall(false, true); return { ok: true }; });
 ipcMain.handle('nova:app-info', async () => ({ appVersion: app.getVersion(), novaVersion: NOVA_VERSION, packaged: app.isPackaged }));
