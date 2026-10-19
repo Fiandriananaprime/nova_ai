@@ -142,6 +142,123 @@ async function readResponseCandidates(
   return candidates;
 }
 
+
+interface AnchoredResponseSnapshot {
+  userMessageFound: boolean;
+  assistantTexts: string[];
+  protocolTexts: string[];
+}
+
+/**
+ * Locate the exact outgoing user message by its message ID, then read only assistant
+ * nodes that follow it in DOM order. This prevents a previous assistant turn from
+ * being mistaken for the answer to the current request.
+ */
+async function readAssistantMessagesAfterOutgoingMessage(
+  page: Page,
+  selectors: WebProviderSelectors,
+  expectedMessageId: string,
+): Promise<AnchoredResponseSnapshot> {
+  const userSelectors = selectors.userMessage
+    ? Array.isArray(selectors.userMessage) ? selectors.userMessage : [selectors.userMessage]
+    : [];
+  const assistantSelectors = selectors.assistantMessage
+    ? Array.isArray(selectors.assistantMessage) ? selectors.assistantMessage : [selectors.assistantMessage]
+    : [];
+
+  return page.locator('body').evaluate((body, options) => {
+    const main = body.querySelector('main');
+    const root = main ?? body;
+    const scopes: ParentNode[] = root === body ? [body] : [root, body];
+    const textOf = (element: Element): string => {
+      const html = element as HTMLElement;
+      return (html.innerText || element.textContent || '').trim();
+    };
+    const queryNodes = (items: string[]): Element[] => {
+      const found = new Set<Element>();
+      for (const scope of scopes) {
+        for (const selector of items) {
+          try {
+            scope.querySelectorAll(selector).forEach((element) => found.add(element));
+          } catch {
+            // One provider selector can become invalid after a UI update; try the rest.
+          }
+        }
+      }
+      return Array.from(found).sort((left, right) => {
+        if (left === right) return 0;
+        const position = left.compareDocumentPosition(right);
+        if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return 0;
+      });
+    };
+    const userNodes = queryNodes(options.userSelectors);
+    let outgoing = userNodes.filter((element) => textOf(element).includes(options.expectedMessageId)).at(-1);
+    const matchedUserSelector = Boolean(outgoing);
+
+    // Provider selectors are best-effort. If they miss the user bubble, anchor to the
+    // smallest rendered element containing the ID sent in this request.
+    if (!outgoing) {
+      const genericMatches = Array.from(root.querySelectorAll('*')).filter((element) => {
+        if (element.matches('input, textarea, [contenteditable="true"]')) return false;
+        const html = element as HTMLElement;
+        return html.getClientRects().length > 0 && textOf(element).includes(options.expectedMessageId);
+      });
+      genericMatches.sort((left, right) => textOf(left).length - textOf(right).length);
+      outgoing = genericMatches[0];
+    }
+    if (!outgoing) return { userMessageFound: false, assistantTexts: [], protocolTexts: [] };
+
+    const followsOutgoingMessage = (element: Element): boolean => {
+      if (element === outgoing || outgoing!.contains(element)) return false;
+      const position = outgoing!.compareDocumentPosition(element);
+      return Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)
+        && !Boolean(position & Node.DOCUMENT_POSITION_CONTAINED_BY);
+    };
+    const assistantTexts = queryNodes(options.assistantSelectors)
+      .filter(followsOutgoingMessage)
+      .map(textOf)
+      .filter(Boolean)
+      .slice(-5);
+
+    // If the provider selector identifies the whole user bubble, also inspect rendered
+    // protocol-bearing elements after it. This covers DOM changes where the assistant
+    // selector stops matching once generation finishes.
+    let protocolTexts: string[] = [];
+    if (matchedUserSelector) {
+      const hasProtocolFields = (element: Element): boolean => {
+        const value = textOf(element);
+        return value.includes('"protocol"') && value.includes('"acknowledgedMessageId"');
+      };
+      const protocolNodes = Array.from(root.querySelectorAll('*'))
+        .filter(followsOutgoingMessage)
+        .filter(hasProtocolFields);
+      const leafNodes = protocolNodes.filter((element) =>
+        !Array.from(element.children).some((child) => hasProtocolFields(child)));
+      protocolTexts = (leafNodes.length ? leafNodes : protocolNodes)
+        .map(textOf)
+        .filter(Boolean)
+        .slice(-5);
+    }
+
+    return { userMessageFound: true, assistantTexts, protocolTexts };
+  }, { userSelectors, assistantSelectors, expectedMessageId });
+}
+
+/** Extract the latest matching protocol object from assistant messages after an outgoing user message. */
+export function extractProtocolResponseAfterOutgoingMessage(
+  assistantMessagesAfterOutgoingMessage: string[],
+  expectedMessageId: string,
+): string {
+  for (let index = assistantMessagesAfterOutgoingMessage.length - 1; index >= 0; index -= 1) {
+    const candidate = assistantMessagesAfterOutgoingMessage[index] ?? '';
+    const response = extractProtocolResponse(candidate, expectedMessageId);
+    if (response) return response;
+  }
+  return '';
+}
+
 export async function sendAndReadLastAssistant(
   page: Page,
   message: string,
@@ -274,26 +391,55 @@ export async function sendAndReadLastAssistant(
   let stableCount = 0;
   let previousInvalidReply = '';
   let stableInvalidReplyCount = 0;
+  let anchorLogged = false;
 
   while (Date.now() < hardDeadline && Date.now() - lastActivity < timeoutMs) {
     await throwIfAborted(page, selectors, signal);
-    const candidates = await readResponseCandidates(page, assistant, beforeAssistantCount, selectors);
-    const latestAssistantText = assistant
-      ? await assistant.last().innerText({ timeout: 1000 }).catch(() => '')
-      : '';
+    const anchored = await readAssistantMessagesAfterOutgoingMessage(page, selectors, expectedMessageId);
+    if (anchored.userMessageFound && !anchorLogged) {
+      trace('browser.message.anchor_found', {
+        expectedMessageId,
+        assistantMessagesAfterAnchor: anchored.assistantTexts.length,
+        protocolCandidatesAfterAnchor: anchored.protocolTexts.length,
+      });
+      anchorLogged = true;
+    }
+
+    const anchoredCandidates = [
+      ...anchored.assistantTexts.slice().reverse(),
+      ...anchored.protocolTexts.slice().reverse(),
+    ];
+    const candidates = anchoredCandidates.length > 0
+      ? anchoredCandidates
+      : await readResponseCandidates(page, assistant, beforeAssistantCount, selectors);
+    const latestAssistantText = anchored.userMessageFound
+      ? anchored.assistantTexts.at(-1) ?? anchored.protocolTexts.at(-1) ?? ''
+      : assistant
+        ? await assistant.last().innerText({ timeout: 1000 }).catch(() => '')
+        : '';
     const assistantReplyChanged = Boolean(latestAssistantText.trim())
       && latestAssistantText !== beforeLatestAssistantText;
-    let text = '';
-    for (const candidate of candidates) {
-      text = extractProtocolResponse(candidate, expectedMessageId);
-      if (text) break;
+    let text = anchored.userMessageFound
+      ? extractProtocolResponseAfterOutgoingMessage(anchored.assistantTexts, expectedMessageId)
+        || extractProtocolResponseAfterOutgoingMessage(anchored.protocolTexts, expectedMessageId)
+      : '';
+    if (!text) {
+      for (const candidate of candidates) {
+        text = extractProtocolResponse(candidate, expectedMessageId);
+        if (text) break;
+      }
     }
     let wrongAck: string | undefined;
     if (!text && assistantReplyChanged) {
-      const acknowledged = extractAcknowledgedMessageId(latestAssistantText);
-      const latestProtocolResponse = extractProtocolResponse(latestAssistantText);
-      if (latestProtocolResponse && acknowledged && acknowledged !== expectedMessageId) {
-        wrongAck = acknowledged;
+      const protocolCandidates = anchored.userMessageFound
+        ? anchoredCandidates
+        : [latestAssistantText];
+      for (const candidate of protocolCandidates) {
+        const latestProtocolResponse = extractProtocolResponse(candidate);
+        if (!latestProtocolResponse) continue;
+        const acknowledged = extractAcknowledgedMessageId(latestProtocolResponse);
+        if (acknowledged && acknowledged !== expectedMessageId) wrongAck = acknowledged;
+        break;
       }
     }
     responseStarted ||= Boolean(text);
