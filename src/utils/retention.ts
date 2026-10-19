@@ -3,7 +3,8 @@ import path from 'node:path';
 import { assertSafeAgentDirectory, assertSafeAgentPath } from '../security/agent-files.js';
 import { NovaError } from './errors.js';
 
-const MAX_FILES_PER_DIRECTORY = 10;
+const MAX_FILES_PER_DIRECTORY = 15;
+const MAX_LOG_FILES = 10;
 const MAX_LOG_DIRECTORY_BYTES = 5 * 1024 * 1024;
 type RetainedDirectory = 'diff' | 'logs' | 'output';
 
@@ -33,7 +34,8 @@ export async function pruneAgentFiles(projectRoot: string, directory: RetainedDi
   let remainingFiles = files.length;
   const removed: string[] = [];
   for (const file of files) {
-    const overFileLimit = remainingFiles > MAX_FILES_PER_DIRECTORY;
+    const maxFiles = directory === 'logs' ? MAX_LOG_FILES : MAX_FILES_PER_DIRECTORY;
+    const overFileLimit = remainingFiles > maxFiles;
     const overLogByteLimit = directory === 'logs' && totalBytes > MAX_LOG_DIRECTORY_BYTES;
     if (!overFileLimit && !overLogByteLimit) break;
     try {
