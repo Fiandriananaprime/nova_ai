@@ -149,7 +149,7 @@ async function readRequestedFile(
 const MAX_LINES_PER_FILE_CHUNK = 300;
 const MAX_BYTES_PER_FILE_CHUNK = 12 * 1024;
 const MAX_PROTOCOL_REPAIR_ATTEMPTS = 2;
-const REPAIRABLE_RESPONSE_CODES = new Set(['AI_JSON_INVALID', 'AI_PROTOCOL_INVALID', 'AI_MESSAGE_ACK_INVALID']);
+const REPAIRABLE_RESPONSE_CODES = new Set(['AI_JSON_INVALID', 'AI_PROTOCOL_INVALID']);
 
 interface FileChunk { content: string; firstLine: number; lastLine: number; lineCount: number; }
 
