@@ -31,6 +31,7 @@ import { ensureProjectInitialized } from '../context/project-setup.js';
 import { loadIgnoreRules, isIgnored } from '../context/ignore.js';
 import { assertSafeAgentPath, resolveAgentStorePath } from '../security/agent-files.js';
 import { pruneAgentFiles } from '../utils/retention.js';
+import { emitNovaEvent, requestNovaApproval, requestNovaAnswer, withNovaCoreCallbacks, type NovaCoreCallbacks } from './events.js';
 
 export interface FixOptions {
   projectRoot: string;
@@ -41,6 +42,7 @@ export interface FixOptions {
   noApply?: boolean;
   approvalPolicy?: ApprovalPolicy;
   resumeSession?: PersistedSession;
+  callbacks?: NovaCoreCallbacks;
 }
 
 async function readProjectContext(projectRoot: string): Promise<string> {
@@ -79,7 +81,10 @@ async function readProjectContext(projectRoot: string): Promise<string> {
 function transition(session: PersistedSession, state: PersistedSession['state'], detail: string): void {
   assertTransition(session.state, state);
   session.state = state;
-  session.exchanges.push({ at: new Date().toISOString(), state, detail: detail.slice(0, 3000) });
+  const at = new Date().toISOString();
+  session.exchanges.push({ at, state, detail: detail.slice(0, 3000) });
+  emitNovaEvent({ type: 'status', sessionId: session.id, state, detail: detail.slice(0, 3000), at });
+  emitNovaEvent({ type: 'session', session: structuredClone(session) });
 }
 
 async function getProvider(providerId: string, projectRoot: string): Promise<AIProvider> {
@@ -217,6 +222,7 @@ async function readTransferFile(projectRoot: string, filePath: string, session: 
 }
 
 export async function runFix(options: FixOptions): Promise<PersistedSession> {
+  return withNovaCoreCallbacks(options.callbacks, async () => {
   const projectRoot = path.resolve(options.projectRoot);
   await ensureProjectInitialized(projectRoot);
   const config = await loadConfig(projectRoot);
@@ -689,4 +695,5 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       await provider.close().catch(() => undefined);
     }
   }
+  });
 }
