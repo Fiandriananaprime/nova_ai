@@ -22,7 +22,7 @@ import { PROJECT_CONTEXT_TEMPLATE } from '../context/descriptions.js';
 import { fitContext } from '../context/token-budget.js';
 import { assertTransition } from './state-machine.js';
 import { prepareAndStorePatch } from '../patches/prepare.js';
-import { loadSession, saveSession, type ApprovalPolicy, type PersistedSession } from './persistence.js';
+import { saveSession, type ApprovalPolicy, type PersistedSession } from './persistence.js';
 import { assertNoPotentialSecret } from '../security/secrets.js';
 import type { ProjectFile } from '../context/file-reader.js';
 import { captureInteractiveSteering, consumeSteeringMessages, formatSteering } from './steering.js';
