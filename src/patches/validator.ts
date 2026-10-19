@@ -5,14 +5,16 @@ import { assertAllowedProjectPath } from '../security/permissions.js';
 import { assertNoPotentialSecret } from '../security/secrets.js';
 import { sha256 } from '../utils/fs.js';
 import { NovaError } from '../utils/errors.js';
-import { parsePatch, type PatchFile } from './parser.js';
+import { normalizePatchHunkCounts, parsePatch, type PatchFile } from './parser.js';
 
 export interface PreparedPatch { files: PatchFile[]; diff: string; originalHashes: Record<string, string | null>; }
 
 export async function validatePatch(projectRoot: string, patch: string, readHashes: Record<string, string>, maxBytes = 2 * 1024 * 1024): Promise<PreparedPatch> {
   if (Buffer.byteLength(patch, 'utf8') > maxBytes) throw new NovaError(`Patch trop volumineux (limite ${maxBytes} octets).`, 'PATCH_TOO_LARGE');
-  assertNoPotentialSecret(patch, 'patch proposé');
-  const files = parsePatch(patch);
+  const normalizedPatch = normalizePatchHunkCounts(patch);
+  if (Buffer.byteLength(normalizedPatch, 'utf8') > maxBytes) throw new NovaError(`Patch trop volumineux (limite ${maxBytes} octets).`, 'PATCH_TOO_LARGE');
+  assertNoPotentialSecret(normalizedPatch, 'patch proposé');
+  const files = parsePatch(normalizedPatch);
   const originalHashes: Record<string, string | null> = {};
 
   for (const file of files) {
@@ -37,8 +39,8 @@ export async function validatePatch(projectRoot: string, patch: string, readHash
   }
 
   const check = await execa('git', ['-c', 'core.autocrlf=false', 'apply', '--check', '--whitespace=nowarn', '-'], {
-    cwd: path.resolve(projectRoot), input: patch, reject: false, windowsHide: true, maxBuffer: 8 * 1024 * 1024,
+    cwd: path.resolve(projectRoot), input: normalizedPatch, reject: false, windowsHide: true, maxBuffer: 8 * 1024 * 1024,
   });
   if (check.exitCode !== 0) throw new NovaError(`Patch non applicable sans conflit : ${(check.stderr || check.stdout).trim()}`, 'PATCH_APPLY_CHECK_FAILED');
-  return { files, diff: patch, originalHashes };
+  return { files, diff: normalizedPatch, originalHashes };
 }
