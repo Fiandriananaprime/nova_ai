@@ -14,39 +14,65 @@ async function throwIfAborted(page: Page, selectors: WebProviderSelectors, signa
   throw new NovaError('La tâche a été arrêtée depuis Nova Desktop.', 'SESSION_CANCELLED');
 }
 
-function extractProtocolResponse(text: string, expectedMessageId?: string): string {
+/** Consecutive identical polls (~700 ms each) after which a valid reply is accepted even if the stop button never disappears. */
+const STABLE_POLLS_WITH_STOP_VISIBLE = 6;
+/** Consecutive polls showing a reply for another message id before failing fast instead of waiting for the timeout. */
+const STABLE_POLLS_FOR_WRONG_ACK = 4;
+/** Max assistant nodes read per poll, newest first, to keep each poll cheap. */
+const MAX_ASSISTANT_NODES_READ = 5;
+/** Max `{` positions tried before one `"protocol"` key (the key is not always the first one in the object). */
+const MAX_OBJECT_START_CANDIDATES = 40;
+
+/** Returns the balanced `{…}` object starting at `start` and the index just after it, ignoring braces inside strings. */
+function readBalancedObject(text: string, start: number): { json: string; end: number } | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}' && --depth === 0) return { json: text.slice(start, index + 1), end: index + 1 };
+  }
+  return undefined;
+}
+
+function parseProtocolObject(json: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(json);
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)
+      && 'protocol' in value && value.protocol === 'nova-agent/1'
+      && 'status' in value && typeof value.status === 'string' && STATUSES.has(value.status)) return value as Record<string, unknown>;
+  } catch { /* Not a complete protocol object; the caller tries another candidate. */ }
+  return undefined;
+}
+
+/**
+ * Finds the latest complete nova-agent/1 object in rendered page text.
+ * Walks back from each `"protocol"` key over every enclosing `{`, so the reply is found
+ * even when `protocol` is not the first key or nested objects precede it.
+ */
+export function extractProtocolResponse(text: string, expectedMessageId?: string): string {
   let searchFrom = text.length;
-  while (searchFrom > 0) {
+  while (searchFrom >= 0) {
     const protocolKey = text.lastIndexOf('"protocol"', searchFrom);
     if (protocolKey < 0) return '';
-    const start = text.lastIndexOf('{', protocolKey);
-    if (start < 0) return '';
-
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let index = start; index < text.length; index += 1) {
-      const char = text[index];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (char === '\\') escaped = true;
-        else if (char === '"') inString = false;
-        continue;
+    let start = text.lastIndexOf('{', protocolKey);
+    for (let tries = 0; start >= 0 && tries < MAX_OBJECT_START_CANDIDATES; tries += 1) {
+      const object = readBalancedObject(text, start);
+      if (object && object.end > protocolKey) {
+        const value = parseProtocolObject(object.json);
+        if (value && (!expectedMessageId || value.acknowledgedMessageId === expectedMessageId)) return object.json;
       }
-      if (char === '"') inString = true;
-      else if (char === '{') depth += 1;
-      else if (char === '}' && --depth === 0) {
-        const candidate = text.slice(start, index + 1);
-        try {
-          const value: unknown = JSON.parse(candidate);
-          if (typeof value === 'object' && value !== null
-            && 'protocol' in value && value.protocol === 'nova-agent/1'
-            && 'status' in value && typeof value.status === 'string' && STATUSES.has(value.status)
-            && (!expectedMessageId || 'acknowledgedMessageId' in value && value.acknowledgedMessageId === expectedMessageId)) return candidate;
-        } catch { /* Try an earlier protocol key in the conversation text. */ }
-        break;
-      }
+      start = start === 0 ? -1 : text.lastIndexOf('{', start - 1);
     }
+    if (protocolKey === 0) return '';
     searchFrom = protocolKey - 1;
   }
   return '';
@@ -55,31 +81,46 @@ function extractProtocolResponse(text: string, expectedMessageId?: string): stri
 function extractAcknowledgedMessageId(text: string): string | undefined {
   const response = extractProtocolResponse(text);
   if (!response) return undefined;
-  try {
-    const value: unknown = JSON.parse(response);
-    return typeof value === 'object' && value !== null && 'acknowledgedMessageId' in value
-      && typeof value.acknowledgedMessageId === 'string' ? value.acknowledgedMessageId : undefined;
-  } catch { return undefined; }
+  const value = parseProtocolObject(response);
+  return typeof value?.acknowledgedMessageId === 'string' ? value.acknowledgedMessageId : undefined;
 }
 
-async function readAssistantResponseText(
+async function readPageText(page: Page, timeout?: number): Promise<string> {
+  const main = await page.locator('main').innerText(timeout ? { timeout } : undefined).catch(() => '');
+  if (main.trim()) return main;
+  return page.locator('body').innerText(timeout ? { timeout } : undefined).catch(() => '');
+}
+
+/**
+ * Text sources that may hold the reply, most specific first: the new assistant nodes,
+ * the newest assistant node (covers virtualised chat lists whose count does not grow),
+ * then the whole conversation area. The caller searches each one for the protocol object,
+ * so a "thinking" node or a reply rendered outside the assistant selector no longer hides it.
+ */
+async function readResponseCandidates(
   page: Page,
   assistant: Locator | undefined,
   beforeAssistantCount: number,
-): Promise<string> {
+): Promise<string[]> {
+  const candidates: string[] = [];
   if (assistant) {
     const count = await assistant.count().catch(() => beforeAssistantCount);
     if (count > beforeAssistantCount) {
+      const parts: string[] = [];
+      for (let index = Math.max(beforeAssistantCount, count - MAX_ASSISTANT_NODES_READ); index < count; index += 1) {
+        parts.push(await assistant.nth(index).innerText({ timeout: 1000 }).catch(() => ''));
+      }
+      const joined = parts.join('\n').trim();
+      if (joined) candidates.push(joined);
+    }
+    if (count > 0) {
       const latest = await assistant.last().innerText({ timeout: 1000 }).catch(() => '');
-      if (latest.trim()) return latest;
+      if (latest.trim()) candidates.push(latest);
     }
   }
-
-  // Some providers render assistant turns outside their main landmark. Their
-  // response selectors can be added without changing the send/read protocol.
-  const mainText = await page.locator('main').innerText({ timeout: 1000 }).catch(() => '');
-  if (mainText.trim()) return mainText;
-  return page.locator('body').innerText({ timeout: 1000 }).catch(() => '');
+  const pageText = await readPageText(page, 1000);
+  if (pageText.trim()) candidates.push(pageText);
+  return candidates;
 }
 
 export async function sendAndReadLastAssistant(
@@ -110,7 +151,7 @@ export async function sendAndReadLastAssistant(
   const beforeAssistantCount = assistant ? await assistant.count() : 0;
   const userMessages = selectors.userMessage ? page.locator(selectors.userMessage) : undefined;
   const beforeUserCount = userMessages ? await userMessages.count() : 0;
-  const beforeMainText = await page.locator('main').innerText().catch(() => '');
+  const beforeMainText = await readPageText(page);
   const beforeAcknowledgedMessageId = extractAcknowledgedMessageId(beforeMainText);
   let filled = false;
   for (let attempt = 0; attempt < 3 && !filled; attempt += 1) {
@@ -176,7 +217,7 @@ export async function sendAndReadLastAssistant(
     const latestUserMessage = messageAddedToHistory
       ? await userMessages!.last().innerText().catch(() => '')
       : '';
-    const mainText = await page.locator('main').innerText().catch(() => '');
+    const mainText = await readPageText(page);
     const outgoingMessageVisible = latestUserMessage.includes(expectedMessageId)
       || mainText.includes(expectedMessageId) && !beforeMainText.includes(expectedMessageId);
     const generationStarted = Boolean(await findFirstVisible(page, selectors.stopButton));
@@ -189,35 +230,61 @@ export async function sendAndReadLastAssistant(
     throw new NovaError('Le fournisseur n’a pas confirmé l’envoi : le champ contient encore le message et aucune génération n’a commencé.', 'BROWSER_SEND_FAILED');
   }
 
-  const deadline = Date.now() + timeoutMs;
+  // The timeout is an inactivity limit: it restarts while the provider is generating or the page is
+  // still changing, so long answers are not cut off. A hard cap still bounds the total wait.
+  const hardDeadline = Date.now() + Math.max(timeoutMs * 5, 10 * 60 * 1000);
+  let lastActivity = Date.now();
+  let lastSignature = '';
   let responseStarted = false;
   let unacknowledgedMessageId: string | undefined;
+  let wrongAckPolls = 0;
   let previous = '';
   let stableCount = 0;
 
-  while (Date.now() < deadline) {
+  while (Date.now() < hardDeadline && Date.now() - lastActivity < timeoutMs) {
     await throwIfAborted(page, selectors, signal);
-    const responseText = await readAssistantResponseText(page, assistant, beforeAssistantCount);
-    const protocolText = extractProtocolResponse(responseText, expectedMessageId);
-    if (!protocolText) {
-      const latestAcknowledgedMessageId = extractAcknowledgedMessageId(responseText);
-      if (latestAcknowledgedMessageId && latestAcknowledgedMessageId !== beforeAcknowledgedMessageId) {
-        unacknowledgedMessageId = latestAcknowledgedMessageId;
+    const candidates = await readResponseCandidates(page, assistant, beforeAssistantCount);
+    let text = '';
+    for (const candidate of candidates) {
+      text = extractProtocolResponse(candidate, expectedMessageId);
+      if (text) break;
+    }
+    let wrongAck: string | undefined;
+    if (!text) {
+      for (const candidate of candidates) {
+        const acknowledged = extractAcknowledgedMessageId(candidate);
+        if (acknowledged) {
+          if (acknowledged !== beforeAcknowledgedMessageId && acknowledged !== expectedMessageId) wrongAck = acknowledged;
+          break;
+        }
       }
     }
-    const text = protocolText;
     responseStarted ||= Boolean(text);
-    const stop = await findFirstVisible(page, selectors.stopButton);
+    const stop = Boolean(await findFirstVisible(page, selectors.stopButton));
+
+    const signature = `${candidates[0]?.length ?? 0}:${text.length}`;
+    if (stop || signature !== lastSignature) lastActivity = Date.now();
+    lastSignature = signature;
+
     // The provider can briefly expose the previous assistant turn after submission.
     // Keep polling for the current request's acknowledgement instead of failing on stale UI text.
-    if (responseStarted && text && text === previous && !stop) stableCount += 1;
+    if (text && text === previous) stableCount += 1;
     else stableCount = 0;
 
-    if (text && stableCount >= 2 && !stop) {
+    // A complete, valid protocol object for this message is the real end-of-reply signal.
+    // The stop button only speeds things up; if its selector is stuck we still accept after a longer stable period.
+    if (text && (stableCount >= 2 && !stop || stableCount >= STABLE_POLLS_WITH_STOP_VISIBLE)) {
       if (Buffer.byteLength(text, 'utf8') > maxResponseBytes) {
         throw new NovaError(`Réponse du fournisseur trop volumineuse (limite ${maxResponseBytes} octets).`, 'AI_RESPONSE_TOO_LARGE');
       }
       return text;
+    }
+
+    // The provider answered, but acknowledged another message id: fail now with the precise error.
+    wrongAckPolls = wrongAck && wrongAck === unacknowledgedMessageId && !stop ? wrongAckPolls + 1 : 0;
+    if (wrongAck) unacknowledgedMessageId = wrongAck;
+    if (wrongAckPolls >= STABLE_POLLS_FOR_WRONG_ACK) {
+      throw new NovaError(`Accuse de message invalide : Nova attendait ${expectedMessageId}, mais le fournisseur a repondu pour ${unacknowledgedMessageId}.`, 'AI_MESSAGE_ACK_INVALID');
     }
 
     previous = text;
