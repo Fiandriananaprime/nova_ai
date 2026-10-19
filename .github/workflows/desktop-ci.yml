@@ -1,0 +1,40 @@
+name: Desktop CI
+on:
+  push:
+    branches: [feat/electron-desktop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install
+      - run: npm test
+      - run: npm run build
+      - run: npm run desktop:dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nova-Agent-Windows-Installer
+          path: release/*.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nova-Agent-Desktop-Source
+          path: |
+            electron/
+            electron-builder.yml
+            package.json
+            package-lock.json
+            src/
+            prompts/
+            tsconfig.json
+            README.md
+          if-no-files-found: error

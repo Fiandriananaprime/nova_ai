@@ -369,3 +369,31 @@ src/
 ```
 
 Le dossier `prompts/` contient le prompt système et la documentation du protocole ; `examples/` contient des exemples documentaires identifiés comme fictifs.
+
+
+## Application desktop Windows (Electron)
+
+Nova Agent dispose également d'une interface desktop à trois panneaux : arborescence du projet à gauche, conversation et activité au centre, modifications et diff à droite. Le moteur d'orchestration et les contrôles de sécurité existants sont réutilisés.
+
+### Lancer depuis les sources (PowerShell)
+
+```powershell
+npm install
+npm run desktop
+```
+
+Au premier démarrage, l'application vérifie si le CLI global `@xvortex/nova-agent` est installé et tente de l'installer avec npm si nécessaire. Le moteur utilisé par l'interface reste celui du dépôt, compilé dans `dist`.
+
+### Construire l'installateur .exe
+
+```powershell
+npm run desktop:dist
+```
+
+L'installateur Windows NSIS est créé dans `release/Nova-Agent-Setup-<version>.exe`. Le workflow GitHub Actions `.github/workflows/desktop-ci.yml` compile le projet, exécute les tests et publie l'installateur comme artefact lorsque le build réussit.
+
+### Mises à jour
+
+Une version publiée du desktop est vérifiée au démarrage. Si une version plus récente existe, Nova propose de la télécharger ; après le téléchargement, l'utilisateur confirme le redémarrage pour installer la mise à jour. Les releases desktop se déclenchent avec un tag `desktop-v*` via `.github/workflows/desktop-release.yml`.
+
+Voir [electron/README.md](electron/README.md) pour les détails.

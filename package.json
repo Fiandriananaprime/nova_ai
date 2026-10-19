@@ -19,7 +19,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "node dist/cli/index.js"
+    "start": "node dist/cli/index.js",
+    "desktop": "npm run build && electron .",
+    "desktop:dir": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder --win nsis"
   },
   "engines": {
     "node": ">=20.19.0"
@@ -31,12 +34,16 @@
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.5",
     "playwright": "^1.55.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "electron-updater": "^6.6.2"
   },
   "devDependencies": {
     "@types/node": "^22.18.6",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
-  }
+    "vitest": "^3.2.4",
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12"
+  },
+  "main": "electron/main.mjs"
 }
