@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { extractProtocolResponse, extractProtocolResponseAfterOutgoingMessage, selectResponseCandidates } from '../src/browser/response-reader.js';
+import { extractProtocolResponse, extractProtocolResponseAfterOutgoingMessage, isCredibleInvalidReplyCandidate, selectResponseCandidates } from '../src/browser/response-reader.js';
 
 const reply = (extra: Record<string, unknown> = {}, id = 'msg-2') => JSON.stringify({
   protocol: 'nova-agent/1', status: 'DONE', acknowledgedMessageId: id, ...extra,
+});
+
+describe('invalid reply candidate detection', () => {
+  it('ignores one-character fragments from generic following-turn siblings', () => {
+    expect(isCredibleInvalidReplyCandidate('…', false)).toBe(false);
+    expect(isCredibleInvalidReplyCandidate(' ', false)).toBe(false);
+  });
+
+  it('allows meaningful short fallback replies to trigger the bounded invalid-reply detector', () => {
+    expect(isCredibleInvalidReplyCandidate('Salut !', false)).toBe(true);
+    expect(isCredibleInvalidReplyCandidate('X', true)).toBe(true);
+  });
 });
 
 describe('extractProtocolResponse', () => {
