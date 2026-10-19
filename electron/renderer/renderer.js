@@ -83,7 +83,7 @@ $('composer').addEventListener('submit',async e=>{e.preventDefault();const probl
 $('task-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('composer').requestSubmit();}});
 document.querySelectorAll('.suggestion').forEach(el=>el.addEventListener('click',()=>{$('task-input').value=el.dataset.prompt;$('task-input').focus();}));
 document.querySelectorAll('.diff-tab').forEach(el=>el.addEventListener('click',()=>{state.diffTab=el.dataset.diffTab;document.querySelectorAll('.diff-tab').forEach(t=>t.classList.toggle('active',t===el));$('change-list').classList.toggle('hidden',state.diffTab!=='changes');$('diff-view').classList.toggle('hidden',state.diffTab!=='diff');}));
-$('apply-changes').addEventListener('click',()=>{toast('Le patch est prêt. L’application directe sera activée via le point d’entrée d’approbation du moteur Nova.');});
+$('apply-changes').addEventListener('click',()=>{if(!state.pendingPatch){toast('Aucun patch à appliquer.');return;} $('approval-panel').scrollIntoView({behavior:'smooth',block:'center'}); if($('approval-panel').classList.contains('hidden')) toast('Utilise le panneau d’approbation pour autoriser ou refuser le patch.');});
 $('settings').addEventListener('click',async()=>{const info=await window.novaDesktop.appInfo();$('version-info').textContent=`Desktop ${info.appVersion} · Nova Core ${info.novaVersion}`; $('info-dialog').showModal();});
 $('collapse-files').addEventListener('click',()=>$('file-tree').classList.toggle('hidden'));
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='o'){e.preventDefault();openProject();}});
