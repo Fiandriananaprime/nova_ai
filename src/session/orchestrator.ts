@@ -151,7 +151,10 @@ async function readRequestedFile(
 const MAX_LINES_PER_FILE_CHUNK = 300;
 const MAX_BYTES_PER_FILE_CHUNK = 12 * 1024;
 const MAX_PROTOCOL_REPAIR_ATTEMPTS = 2;
-const REPAIRABLE_RESPONSE_CODES = new Set(['AI_JSON_INVALID', 'AI_PROTOCOL_INVALID']);
+const REPAIRABLE_RESPONSE_CODES = new Set([
+  'AI_JSON_INVALID', 'AI_PROTOCOL_INVALID',
+  'PATCH_APPLY_CHECK_FAILED', 'PATCH_HUNK_INVALID', 'PATCH_FORMAT_INVALID', 'PATCH_HEADER_INVALID',
+]);
 
 interface FileChunk { content: string; firstLine: number; lastLine: number; lineCount: number; }
 
@@ -344,7 +347,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         cycle: session.cycle,
         taskId: request.taskId,
         messageId: request.messageId,
-        message: request.message,
+        messageBytes: Buffer.byteLength(request.message, 'utf8'),
         messageIds: [...messageIds],
         includeGeneralPrompt: request.includeGeneralPrompt,
         projectContextBytes: Buffer.byteLength(request.projectContext, 'utf8'),
@@ -380,18 +383,23 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         while (true) {
           try {
             response = await provider.send(repairRequest);
-            logger.record('orchestrator.response.received', { cycle: session.cycle, messageId: repairRequest.messageId, messageIds: [...messageIds], response });
+            logger.record('orchestrator.response.received', { cycle: session.cycle, messageId: repairRequest.messageId, messageIds: [...messageIds], status: response.status, responseBytes: Buffer.byteLength(JSON.stringify(response), 'utf8') });
             // Validate PATCH_READY before leaving the repair loop. JSON validity
             // alone does not guarantee that the patch field contains a git diff.
             if (response.status === 'PATCH_READY'
               || response.status === 'FILE_RECEIVED' && response.nextStatus === 'PATCH_READY') {
               logger.record('patch.validation.start', { messageId: repairRequest.messageId, responseStatus: response.status, nextStatus: response.nextStatus, patchBytes: Buffer.byteLength(response.patch!, 'utf8') });
               try {
-                const prepared = await validatePatch(projectRoot, response.patch!, session.fileHashes, config.patches.maxPatchBytes);
-                logger.record('patch.validation.ok', { messageId: repairRequest.messageId, files: prepared.files.map((file) => file.path) });
+                const candidatePatch = response.patch!;
+                const prepared = await validatePatch(projectRoot, candidatePatch, session.fileHashes, config.patches.maxPatchBytes);
+                if (prepared.diff !== candidatePatch) {
+                  response = { ...response, patch: prepared.diff } as AIResponse;
+                  logger.record('patch.normalized', { messageId: repairRequest.messageId, originalBytes: Buffer.byteLength(candidatePatch, 'utf8'), normalizedBytes: Buffer.byteLength(prepared.diff, 'utf8') });
+                }
+                logger.record('patch.validation.ok', { messageId: repairRequest.messageId, files: prepared.files.map((file) => file.path), patchBytes: Buffer.byteLength(prepared.diff, 'utf8') });
               } catch (error) {
                 const issue = asNovaError(error);
-                logger.record('patch.validation.error', { messageId: repairRequest.messageId, responseStatus: response.status, nextStatus: response.nextStatus, code: issue.code, message: issue.message, stack: issue.stack, patch: response.patch });
+                logger.record('patch.validation.error', { messageId: repairRequest.messageId, responseStatus: response.status, nextStatus: response.nextStatus, code: issue.code, message: issue.message, patchBytes: Buffer.byteLength(response.patch ?? '', 'utf8') });
                 throw error;
               }
             }
@@ -603,7 +611,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         const command = response.command!;
         emitNovaEvent({ type: 'activity', sessionId: session.id, text: `Running ${command}` });
         const outcome = await executeRequestedCommand(command, response.commandReason ?? '', session);
-        logger.record('command.completed', { command, approved: outcome.approved, exitCode: outcome.exitCode, stdout: outcome.stdout, stderr: outcome.stderr });
+        logger.record('command.completed', { command, approved: outcome.approved, exitCode: outcome.exitCode, stdoutBytes: Buffer.byteLength(outcome.stdout, 'utf8'), stderrBytes: Buffer.byteLength(outcome.stderr, 'utf8') });
         const commandMetadata = formatCommandResult(command, { ...outcome, stdout: '', stderr: '' });
         const commandText = `${commandMetadata}\n\nstdout:\n${outcome.stdout || '(vide)'}\nstderr:\n${outcome.stderr || '(vide)'}`;
         const outputChunks = splitFileIntoChunks(commandText);
@@ -756,7 +764,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       }
 
       if (response.status === 'PATCH_READY') {
-        logger.record('patch.received', { messageId: responseMessageId, summary: response.summary, patch: response.patch, suggestedTests: response.tests });
+        logger.record('patch.received', { messageId: responseMessageId, summary: response.summary, patchBytes: Buffer.byteLength(response.patch!, 'utf8'), suggestedTests: response.tests });
         renderStatus('PATCH_READY', 'diff préparé');
         transition(session, 'VALIDATING_PATCH', 'Validation du patch, des chemins et des empreintes d’origine.');
         const prepared = await validatePatch(projectRoot, response.patch!, session.fileHashes, config.patches.maxPatchBytes);
