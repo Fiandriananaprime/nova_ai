@@ -233,15 +233,6 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
   await ensureProjectInitialized(projectRoot);
   const config = await loadConfig(projectRoot);
   const selectedProviderId = options.providerId ?? config.defaultProvider;
-  let previousSession: PersistedSession | undefined;
-  if (!options.resumeSession) {
-    const pointer = await readOptional(path.join(projectRoot, '.nova_agents', 'session.json'));
-    if (pointer) {
-      const currentSessionId = (JSON.parse(pointer) as { currentSessionId?: unknown }).currentSessionId;
-      if (typeof currentSessionId === 'string') previousSession = await loadSession(projectRoot, currentSessionId);
-    }
-  }
-  const reuseConversation = previousSession?.providerId === selectedProviderId && Boolean(previousSession.providerState);
   const session: PersistedSession = options.resumeSession ?? {
     id: id(),
     projectRoot,
@@ -259,8 +250,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
     fileRequestSignatures: [],
     answers: [],
     contextSent: false,
-    generalPromptSent: Boolean(reuseConversation && previousSession?.generalPromptSent),
-    ...(reuseConversation && previousSession?.providerState ? { providerState: previousSession.providerState } : {}),
+    generalPromptSent: false,
   };
   if (options.providerId && options.providerId !== session.providerId) {
     session.providerId = options.providerId;
