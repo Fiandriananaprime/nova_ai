@@ -237,7 +237,7 @@ async function readAssistantMessagesAfterOutgoingMessage(
       const siblings = Array.from(parent.children);
       const anchorIndex = siblings.indexOf(outgoingTurn);
       for (const sibling of siblings.slice(anchorIndex + 1, anchorIndex + 6)) {
-        if (sibling.querySelector(options.userSelectors.join(','))) break;
+        if (options.userSelectors.length && sibling.querySelector(options.userSelectors.join(','))) break;
         const value = textOf(sibling);
         if (value && !sibling.querySelector('textarea, input, [contenteditable="true"]')) {
           followingTurnTexts.push(value);
