@@ -18,8 +18,12 @@ async function throwIfAborted(page: Page, selectors: WebProviderSelectors, signa
 const STABLE_POLLS_WITH_STOP_VISIBLE = 6;
 /** Consecutive polls showing a reply for another message id before failing fast instead of waiting for the timeout. */
 const STABLE_POLLS_FOR_WRONG_ACK = 4;
-/** A stable non-protocol answer is invalid; even a stuck stop control cannot make Nova wait forever. */
-const STABLE_POLLS_INVALID_REPLY_WITH_STOP = 10;
+/** Let short-lived streaming fragments settle before declaring the reply malformed. */
+const STABLE_POLLS_INVALID_REPLY_WITHOUT_STOP = 8;
+/** A stuck stop control must not allow a malformed reply to wait forever. */
+const STABLE_POLLS_INVALID_REPLY_WITH_STOP = 12;
+/** Generic following-turn siblings can be transient UI artifacts; require meaningful text there. */
+const MIN_UNANCHORED_INVALID_REPLY_CHARACTERS = 3;
 /** Max assistant nodes read per poll, newest first, to keep each poll cheap. */
 const MAX_ASSISTANT_NODES_READ = 5;
 /** Max `{` positions tried before one `"protocol"` key (the key is not always the first one in the object). */
@@ -130,6 +134,16 @@ export async function selectResponseCandidates(
 ): Promise<string[]> {
   if (userMessageFound) return anchoredCandidates;
   return readFallbackCandidates();
+}
+
+/**
+ * A one-character generic sibling is often a transient accessibility/streaming artifact,
+ * not an actual assistant answer. Dedicated assistant nodes are stronger evidence, but
+ * their contents still have to remain stable across several polls before failing.
+ */
+export function isCredibleInvalidReplyCandidate(text: string, hasDedicatedAssistantNode: boolean): boolean {
+  const normalized = text.trim();
+  return normalized.length >= (hasDedicatedAssistantNode ? 1 : MIN_UNANCHORED_INVALID_REPLY_CHARACTERS);
 }
 
 
@@ -450,6 +464,10 @@ export async function sendAndReadLastAssistant(
         : '';
     const assistantReplyChanged = Boolean(latestAssistantText.trim())
       && latestAssistantText !== beforeLatestAssistantText;
+    const hasDedicatedAssistantNode = anchored.userMessageFound
+      ? Boolean(anchored.assistantTexts.at(-1)?.trim() || anchored.protocolTexts.at(-1)?.trim())
+      : Boolean(latestAssistantText.trim());
+    const credibleInvalidReply = isCredibleInvalidReplyCandidate(latestAssistantText, hasDedicatedAssistantNode);
     let text = anchored.userMessageFound
       ? extractProtocolResponseAfterOutgoingMessage(anchored.assistantTexts, expectedMessageId)
         || extractProtocolResponseAfterOutgoingMessage(anchored.protocolTexts, expectedMessageId)
@@ -478,13 +496,16 @@ export async function sendAndReadLastAssistant(
 
     // A stable non-protocol answer must trigger the existing protocol-repair path.
     // Do not rely only on the stop button: some provider UIs leave it stuck visible.
-    if (!text && assistantReplyChanged) {
+    if (!text && assistantReplyChanged && credibleInvalidReply) {
       if (latestAssistantText === previousInvalidReply) stableInvalidReplyCount += 1;
       else {
         previousInvalidReply = latestAssistantText;
         stableInvalidReplyCount = 1;
       }
-      if (stableInvalidReplyCount >= 3 && !stop || stableInvalidReplyCount >= STABLE_POLLS_INVALID_REPLY_WITH_STOP) {
+      const requiredStablePolls = stop
+        ? STABLE_POLLS_INVALID_REPLY_WITH_STOP
+        : STABLE_POLLS_INVALID_REPLY_WITHOUT_STOP;
+      if (stableInvalidReplyCount >= requiredStablePolls) {
         trace('browser.assistant.invalid_reply_stable', {
           expectedMessageId,
           stableInvalidReplyCount,
