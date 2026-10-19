@@ -1,0 +1,26 @@
+name: Release Nova Agent Desktop
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+permissions:
+  contents: write
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm test
+      - run: npm run build
+      - run: npm run desktop:dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nova-Agent-Desktop-Installer
+          path: release/*.exe
+          if-no-files-found: error
