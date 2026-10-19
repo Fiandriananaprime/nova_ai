@@ -6,14 +6,16 @@ const reply = (extra: Record<string, unknown> = {}, id = 'msg-2') => JSON.string
 });
 
 describe('invalid reply candidate detection', () => {
-  it('ignores one-character fragments from generic following-turn siblings', () => {
+  it('never treats generic following-turn UI text as a malformed assistant reply', () => {
     expect(isCredibleInvalidReplyCandidate('…', false)).toBe(false);
-    expect(isCredibleInvalidReplyCandidate(' ', false)).toBe(false);
+    expect(isCredibleInvalidReplyCandidate('Thinking...', false)).toBe(false);
+    expect(isCredibleInvalidReplyCandidate('Salut !', false)).toBe(false);
   });
 
-  it('allows meaningful short fallback replies to trigger the bounded invalid-reply detector', () => {
-    expect(isCredibleInvalidReplyCandidate('Salut !', false)).toBe(true);
+  it('allows text from a real assistant node to trigger bounded protocol repair', () => {
     expect(isCredibleInvalidReplyCandidate('X', true)).toBe(true);
+    expect(isCredibleInvalidReplyCandidate('Salut !', true)).toBe(true);
+    expect(isCredibleInvalidReplyCandidate(' ', true)).toBe(false);
   });
 });
 
