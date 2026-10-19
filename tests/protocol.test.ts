@@ -49,6 +49,9 @@ describe('provider prompt construction', () => {
 
     expect(example).toContain('"acknowledgedMessageId":"<current messageId>"');
     expect(example).not.toContain('"acknowledgedMessageId":"current-message-123"');
+    expect(prompt).toContain('PATCH_READY patch must be a complete, syntactically valid unified Git diff');
+    expect(prompt).toContain('oldCount equals context lines plus removed lines');
+    expect(prompt).toContain('do not turn them into \\<, \\>, or \\*');
   });
 });
 
