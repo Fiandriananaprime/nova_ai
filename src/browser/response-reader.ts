@@ -18,6 +18,8 @@ async function throwIfAborted(page: Page, selectors: WebProviderSelectors, signa
 const STABLE_POLLS_WITH_STOP_VISIBLE = 6;
 /** Consecutive polls showing a reply for another message id before failing fast instead of waiting for the timeout. */
 const STABLE_POLLS_FOR_WRONG_ACK = 4;
+/** A stable non-protocol answer is invalid; even a stuck stop control cannot make Nova wait forever. */
+const STABLE_POLLS_INVALID_REPLY_WITH_STOP = 10;
 /** Max assistant nodes read per poll, newest first, to keep each poll cheap. */
 const MAX_ASSISTANT_NODES_READ = 5;
 /** Max `{` positions tried before one `"protocol"` key (the key is not always the first one in the object). */
@@ -474,17 +476,22 @@ export async function sendAndReadLastAssistant(
     responseStarted ||= Boolean(text);
     const stop = Boolean(await findFirstVisible(page, selectors.stopButton));
 
-    // A completed assistant turn that changed but contains no protocol object is
-    // a protocol violation. Return it to the orchestrator so it can ask the model
-    // to correct the same request instead of waiting for the full response timeout.
-    if (!text && assistantReplyChanged && !stop) {
+    // A stable non-protocol answer must trigger the existing protocol-repair path.
+    // Do not rely only on the stop button: some provider UIs leave it stuck visible.
+    if (!text && assistantReplyChanged) {
       if (latestAssistantText === previousInvalidReply) stableInvalidReplyCount += 1;
       else {
         previousInvalidReply = latestAssistantText;
         stableInvalidReplyCount = 1;
       }
-      if (stableInvalidReplyCount >= 3) {
-        throw new NovaError('Réponse incompatible avec nova-agent/1 : aucun objet JSON de protocole valide détecté.', 'AI_PROTOCOL_INVALID');
+      if (stableInvalidReplyCount >= 3 && !stop || stableInvalidReplyCount >= STABLE_POLLS_INVALID_REPLY_WITH_STOP) {
+        trace('browser.assistant.invalid_reply_stable', {
+          expectedMessageId,
+          stableInvalidReplyCount,
+          stopVisible: stop,
+          replyCharacters: latestAssistantText.length,
+        });
+        throw new NovaError('Réponse incompatible avec nova-agent/1 : une réponse assistant est apparue, mais aucun objet JSON de protocole valide ne correspond à la demande.', 'AI_PROTOCOL_INVALID');
       }
     } else {
       previousInvalidReply = '';
