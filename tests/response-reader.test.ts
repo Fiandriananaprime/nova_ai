@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractProtocolResponse } from '../src/browser/response-reader.js';
+import { extractProtocolResponse, extractProtocolResponseAfterOutgoingMessage } from '../src/browser/response-reader.js';
 
 const reply = (extra: Record<string, unknown> = {}, id = 'msg-2') => JSON.stringify({
   protocol: 'nova-agent/1', status: 'DONE', acknowledgedMessageId: id, ...extra,
@@ -10,6 +10,18 @@ describe('extractProtocolResponse', () => {
     const page = `${reply({}, 'msg-1')}\n---\n${reply({}, 'msg-2')}`;
     expect(JSON.parse(extractProtocolResponse(page, 'msg-2')).acknowledgedMessageId).toBe('msg-2');
     expect(extractProtocolResponse(reply({}, 'msg-1'), 'msg-2')).toBe('');
+  });
+
+  it('searches only the assistant messages after the outgoing message and accepts the matching ID', () => {
+    const staleReply = reply({}, 'msg-1');
+    const currentReply = reply({ summary: 'current response' }, 'msg-2');
+    const result = extractProtocolResponseAfterOutgoingMessage(
+      [staleReply, 'The assistant is still generating…', currentReply],
+      'msg-2',
+    );
+
+    expect(JSON.parse(result).acknowledgedMessageId).toBe('msg-2');
+    expect(extractProtocolResponseAfterOutgoingMessage([staleReply], 'msg-2')).toBe('');
   });
 
   it('finds the reply when "protocol" is not the first key and nested objects come before it', () => {
