@@ -11,12 +11,16 @@ asar: true
 asarUnpack:
   - node_modules/playwright/**/*
 win:
+  icon: electron/assets/nova.ico
   target:
     - target: nsis
       arch:
         - x64
   artifactName: Nova-Agent-Setup-${version}.${ext}
 nsis:
+  installerIcon: electron/assets/nova.ico
+  uninstallerIcon: electron/assets/nova.ico
+  installerHeaderIcon: electron/assets/nova.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

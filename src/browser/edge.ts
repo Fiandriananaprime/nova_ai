@@ -45,7 +45,7 @@ async function waitForDevTools(profilePath: string, timeoutMs: number): Promise<
 
 let shutdownHandlersInstalled = false;
 
-async function terminatePersistentEdge(): Promise<void> {
+export async function terminatePersistentEdge(): Promise<void> {
   let browser: Browser | undefined;
   try {
     const endpoint = await waitForDevTools(getEdgeProfilePath(), 1000);
@@ -101,11 +101,11 @@ async function attachToEdge(options: { timeoutMs: number; url?: string }): Promi
     installShutdownHandlers();
     const context = browser.contexts()[0];
     if (!context) throw new NovaError('Aucun contexte Edge disponible sur le profil Nova.', 'BROWSER_LAUNCH_FAILED');
-    const page = context.pages()[0] ?? await context.newPage();
+    const pages = context.pages();
+    const page = pages.at(-1) ?? await context.newPage();
     const currentUrl = new URL(page.url());
     const targetUrl = options.url ? new URL(options.url) : undefined;
-    const needsAppNavigation = targetUrl
-      && (currentUrl.origin !== targetUrl.origin || currentUrl.pathname !== targetUrl.pathname);
+    const needsAppNavigation = targetUrl && currentUrl.origin !== targetUrl.origin;
     if (options.url && needsAppNavigation) {
       await page.goto(options.url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     }

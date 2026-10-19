@@ -7,3 +7,4 @@ coverage/
 .nova_agents
 !.env.example
 !.env.sample
+release/

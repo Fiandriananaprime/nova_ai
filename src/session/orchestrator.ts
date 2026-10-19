@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, writeFile } from 'node:fs/promises';
 import fg from 'fast-glob';
 import { createProvider } from '../ai/registry.js';
@@ -43,6 +43,9 @@ export interface FixOptions {
   approvalPolicy?: ApprovalPolicy;
   resumeSession?: PersistedSession;
   callbacks?: NovaCoreCallbacks;
+  terminateBrowserOnClose?: boolean;
+  signal?: AbortSignal;
+  forceInitialPrompt?: boolean;
 }
 
 async function readProjectContext(projectRoot: string): Promise<string> {
@@ -322,11 +325,14 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       await saveSession(session);
       const request = {
         taskId: session.id,
+        messageId: randomUUID(),
         message: nextMessage,
         includeGeneralPrompt: !session.generalPromptSent,
         projectContext: session.contextSent ? '' : context,
         ...(!session.contextSent && tree ? { tree } : {}),
         ...(outgoingFiles.length ? { files: outgoingFiles } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.forceInitialPrompt && session.cycle === 1 ? { forceInitialPrompt: true } : {}),
       };
       session.pendingMessage = nextMessage;
       session.pendingFilePaths = outgoingFiles.map((file) => file.path);
@@ -344,6 +350,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         stopThinking();
         await stopSteeringCapture();
       }
+      if (options.signal?.aborted) throw new NovaError('La tâche a été arrêtée depuis Nova Desktop.', 'SESSION_CANCELLED');
       if (session.fileTransferActive) {
         if (session.fileTransferChunkIndex === 1) for (const file of deliveredFiles) renderEvent('read', file.path);
       } else {
@@ -468,6 +475,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         transition(session, 'WAITING_FOR_APPROVAL', 'Une commande demandée par l’IA attend une autorisation utilisateur.');
         await saveSession(session);
         const command = response.command!;
+        emitNovaEvent({ type: 'activity', sessionId: session.id, text: `Running ${command}` });
         const outcome = await executeRequestedCommand(command, response.commandReason ?? '', session);
         const commandMetadata = formatCommandResult(command, { ...outcome, stdout: '', stderr: '' });
         const commandText = `${commandMetadata}\n\nstdout:\n${outcome.stdout || '(vide)'}\nstderr:\n${outcome.stderr || '(vide)'}`;
@@ -691,6 +699,13 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
     return session;
   } catch (error) {
     const issue = asNovaError(error);
+    if (issue.code === 'SESSION_CANCELLED') {
+      session.error = 'SESSION_CANCELLED';
+      transition(session, 'PAUSED', 'Tâche arrêtée depuis le desktop. La session peut être reprise.');
+      await saveSession(session);
+      emitNovaEvent({ type: 'completed', sessionId: session.id, state: session.state });
+      return session;
+    }
     session.error = `${issue.code}: ${issue.message}`;
     transition(session, 'ERROR', session.error);
     await saveSession(session).catch(() => undefined);
@@ -702,7 +717,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       if (providerState) session.providerState = providerState;
       else delete session.providerState;
       await saveSession(session).catch(() => undefined);
-      await provider.close().catch(() => undefined);
+      await provider.close({ terminateBrowser: options.terminateBrowserOnClose ?? false }).catch(() => undefined);
     }
   }
   });

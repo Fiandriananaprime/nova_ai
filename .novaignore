@@ -43,3 +43,5 @@ id_ed25519
 # Large generated assets
 *.min.js
 *.map
+
+release/

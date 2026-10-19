@@ -1,5 +1,5 @@
 import type { AIProvider, AIRequest, AIResponse } from '../../../protocol/schema.js';
-import { EdgeSession } from '../../../browser/session.js';
+import { EdgeSession, isNewProviderConversation } from '../../../browser/session.js';
 import { inspectWebProviderPage } from '../../../browser/page-inspector.js';
 import { sendAndReadLastAssistant } from '../../../browser/response-reader.js';
 import { GEMINI_SELECTORS } from '../../../browser/selectors/web-providers.js';
@@ -29,10 +29,11 @@ export class GeminiWebProvider implements AIProvider {
       const state = await inspectWebProviderPage(page, PROVIDER_HOST, GEMINI_SELECTORS);
       if (!state.authenticated) throw new NovaError('Session Gemini non authentifiée. Connecte-toi manuellement dans Edge puis relance la tâche.', 'BROWSER_NOT_AUTHENTICATED');
       if (!state.usable) throw new NovaError(`${state.detail} Aucun message n’a été envoyé.`, 'BROWSER_SELECTOR_MISMATCH');
-      const message = buildProviderMessage({ ...request, message: `${request.message}\n\nExchange number: ${++this.turn}` });
-      const raw = await sendAndReadLastAssistant(page, message, GEMINI_SELECTORS, this.timeoutMs, this.maxResponseBytes);
+      const newConversation = isNewProviderConversation(this.restoredUrl, page.url(), PROVIDER_HOST);
+      const message = buildProviderMessage({ ...request, forceInitialPrompt: request.forceInitialPrompt || newConversation, message: `${request.message}\n\nExchange number: ${++this.turn}` });
+      const raw = await sendAndReadLastAssistant(page, message, request.messageId, GEMINI_SELECTORS, this.timeoutMs, this.maxResponseBytes, request.signal);
       this.restoredUrl = page.url();
-      return parseAIResponse(raw);
+      return parseAIResponse(raw, request.messageId);
     } catch (error) {
       const issue = asNovaError(error);
       await saveBrowserDiagnostic(this.projectRoot, page ?? this.session.currentPage, issue.code, issue.message).catch(() => undefined);

@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const AIStatusSchema = z.enum(['NEED_FILES', 'FILE_RECEIVED', 'TRANSFER_STOP', 'NEED_INFO', 'RUN_COMMAND', 'PATCH_READY', 'DONE']);
 export const AIResponseSchema = z.object({
   protocol: z.literal('nova-agent/1'),
+  acknowledgedMessageId: z.string().min(1).max(100),
   status: AIStatusSchema,
   reason: z.string().max(10000).optional(),
   files: z.array(z.string().min(1).max(1000)).max(50).optional(),
@@ -31,12 +32,15 @@ export type AIResponse = z.infer<typeof AIResponseSchema>;
 
 export interface AIRequest {
   taskId: string;
+  messageId: string;
   message: string;
   /** Include the general system and protocol instructions only on the session's first exchange. */
   includeGeneralPrompt?: boolean;
   projectContext: string;
   tree?: string;
   files?: Array<{ path: string; content: string; sha256: string }>;
+  signal?: AbortSignal;
+  forceInitialPrompt?: boolean;
 }
 
 export interface AIProvider {

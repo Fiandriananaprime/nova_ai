@@ -3,6 +3,7 @@ export interface WebProviderSelectors {
   sendButton: string[];
   stopButton: string[];
   assistantMessage?: string;
+  userMessage?: string;
 }
 
 export const CLAUDE_SELECTORS: WebProviderSelectors = {

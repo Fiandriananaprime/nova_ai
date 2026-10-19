@@ -13,9 +13,15 @@ export class MockProvider implements AIProvider {
   async send(request: AIRequest): Promise<AIResponse> {
     this.requests.push(structuredClone(request));
     const item = this.script[this.index++];
-    if (typeof item === 'function') return item(request);
-    if (item) return structuredClone(item);
-    return { protocol: 'nova-agent/1', status: 'DONE', reason: 'MockProvider : aucune réponse de scénario configurée.' };
+    if (typeof item === 'function') {
+      const response = await item(request);
+      return { ...response, acknowledgedMessageId: response.acknowledgedMessageId ?? request.messageId ?? 'mock-message' };
+    }
+    if (item) {
+      const response = structuredClone(item);
+      return { ...response, acknowledgedMessageId: response.acknowledgedMessageId ?? request.messageId ?? 'mock-message' };
+    }
+    return { protocol: 'nova-agent/1', acknowledgedMessageId: request.messageId ?? 'mock-message', status: 'DONE', reason: 'MockProvider : aucune réponse de scénario configurée.' };
   }
 
   async close(): Promise<void> { /* no resources */ }

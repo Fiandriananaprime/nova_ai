@@ -10,12 +10,13 @@
   <header class="topbar">
     <div class="brand"><div class="brand-mark">N</div><div><strong>nova</strong><small>AGENT DESKTOP</small></div></div>
     <div class="project-pill"><span class="live-dot"></span><span id="project-label">Aucun projet ouvert</span><button id="open-project" class="quiet">Ouvrir un projet <kbd>Ctrl O</kbd></button></div>
-    <div class="top-actions"><button id="refresh-tree" class="icon-button" title="Actualiser l’arborescence">↻</button><button id="settings" class="icon-button" title="Informations">⚙</button><div class="avatar">N</div></div>
+    <div class="top-actions"><button id="settings" class="icon-button" title="Informations">⚙</button><div class="avatar">N</div></div>
   </header>
   <div class="workspace">
     <aside class="sidebar">
-      <div class="side-heading"><span>EXPLORATEUR</span><button id="collapse-files" class="quiet">−</button></div>
-      <div id="project-name" class="root-label">⌄ &nbsp; OUVRIR UN DOSSIER</div>
+      <div class="side-heading"><span>EXPLORATEUR</span><button id="refresh-tree" class="quiet" title="Actualiser l’arborescence" aria-label="Actualiser l’arborescence">↻</button></div>
+      <button id="open-project-sidebar" class="open-folder-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v9.8a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7z"/><path d="M3.5 9h17"/></svg><span>Ouvrir un projet</span><kbd>Ctrl O</kbd></button>
+      <div id="project-name" class="root-label">Aucun dossier ouvert</div>
       <div id="file-tree" class="file-tree"><div class="empty-tree">Ouvre un projet pour afficher son arborescence.</div></div>
       <div class="side-bottom"><div class="side-heading"><span>SESSION</span></div><div id="session-info" class="session-info">Aucune session active</div><div class="side-heading"><span>ENVIRONNEMENT</span></div><div class="env-row"><span class="env-dot"></span><span>Nova Core</span><span class="env-state">Prêt</span></div><div class="env-row"><span class="env-dot dim"></span><span>Tests</span><span class="env-state">À exécuter</span></div></div>
     </aside>
@@ -30,10 +31,10 @@
       <section id="conversation" class="conversation" aria-live="polite"></section>
       <div id="approval-panel" class="approval-panel hidden"></div>
       <form id="composer" class="composer">
-        <textarea id="task-input" rows="3" placeholder="Demandez à Nova de modifier votre projet… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)" maxlength="10000"></textarea>
-        <div class="composer-bottom"><div class="composer-controls"><label class="model-label">MODÈLE <select id="provider"><option value="chatgpt-web">ChatGPT Web</option><option value="claude-web">Claude Web</option><option value="gemini-web">Gemini Web</option><option value="mock">Mock (tests)</option></select></label><span class="privacy-label">◈ Vos fichiers restent locaux jusqu’à leur transmission</span></div><button id="send-task" class="send-button" type="submit">Lancer la tâche <span>↑</span></button></div>
+        <textarea id="task-input" rows="3" placeholder="Demandez à Nova de modifier votre projet… Tapez /init avant la demande pour renvoyer le prompt initial." maxlength="10000"></textarea>
+        <div class="composer-bottom"><div class="composer-controls"><label class="model-label">MODÈLE <select id="provider"><option value="chatgpt-web">ChatGPT Web</option><option value="claude-web">Claude Web</option><option value="gemini-web">Gemini Web</option><option value="mock">Mock (tests)</option></select></label><span class="privacy-label">◈ Vos fichiers restent locaux jusqu’à leur transmission</span></div><div class="task-actions"><button id="steer-task" class="quiet hidden" type="button" disabled>Guider</button><button id="stop-task" class="stop-button hidden" type="button">Arrêter</button><button id="send-task" class="send-button" type="submit">Lancer la tâche <span>↑</span></button></div></div>
       </form>
-      <div class="bottom-note"><span>Nova peut faire des erreurs. Vérifiez les modifications avant de les appliquer.</span><span id="install-state">CLI : vérification…</span></div>
+      <div class="bottom-note"><span>Vérifiez les modifications avant de les appliquer.</span><span id="install-state">Nova Agent</span></div>
     </main>
     <aside class="diff-panel">
       <div class="diff-header"><div><span class="diff-heading-icon">⌘</span><strong>Modifications</strong></div><span id="diff-count" class="count">0</span></div>

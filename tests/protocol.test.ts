@@ -7,23 +7,23 @@ const protocol = 'nova-agent/1';
 
 describe('protocol parser', () => {
   it('parses a valid JSON response', () => {
-    expect(parseAIResponse(JSON.stringify({ protocol, status: 'DONE', reason: 'No changes needed.' })).status).toBe('DONE');
+    expect(parseAIResponse(JSON.stringify({ protocol, acknowledgedMessageId: 'msg-1', status: 'DONE', reason: 'No changes needed.' })).status).toBe('DONE');
   });
 
   it('accepts one fenced JSON object, but not extra prose', () => {
-    expect(parseAIResponse('```json\n{"protocol":"nova-agent/1","status":"DONE"}\n```').status).toBe('DONE');
-    expect(() => parseAIResponse('Here is the answer: {"protocol":"nova-agent/1","status":"DONE"}')).toThrow();
+    expect(parseAIResponse('```json\n{"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"DONE"}\n```').status).toBe('DONE');
+    expect(() => parseAIResponse('Here is the answer: {"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"DONE"}')).toThrow();
   });
 
   it('rejects unknown status and NEED_INFO without a question', () => {
-    expect(() => parseAIResponse('{"protocol":"nova-agent/1","status":"MAGIC"}')).toThrow();
-    expect(() => parseAIResponse('{"protocol":"nova-agent/1","status":"NEED_INFO"}')).toThrow();
+    expect(() => parseAIResponse('{"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"MAGIC"}')).toThrow();
+    expect(() => parseAIResponse('{"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"NEED_INFO"}')).toThrow();
   });
 
   it('normalizes requested file paths and rejects path traversal', () => {
-    const response = parseAIResponse(JSON.stringify({ protocol, status: 'NEED_FILES', files: ['src\\auth.ts'] }));
+    const response = parseAIResponse(JSON.stringify({ protocol, acknowledgedMessageId: 'msg-1', status: 'NEED_FILES', files: ['src\\auth.ts'] }));
     expect(validateRequestedFiles(response, 5)).toEqual(['src/auth.ts']);
-    const traversal = parseAIResponse(JSON.stringify({ protocol, status: 'NEED_FILES', files: ['../.env'] }));
+    const traversal = parseAIResponse(JSON.stringify({ protocol, acknowledgedMessageId: 'msg-1', status: 'NEED_FILES', files: ['../.env'] }));
     expect(() => validateRequestedFiles(traversal, 5)).toThrow();
   });
 });

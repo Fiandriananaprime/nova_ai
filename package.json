@@ -1,8 +1,13 @@
 {
   "name": "@xvortex/nova-agent",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Agent IA local de développement piloté par CLI, Edge et patchs validés",
   "type": "module",
+  "author": {
+    "name": "Fiandriananaprime",
+    "url": "https://github.com/Fiandriananaprime"
+  },
+  "homepage": "https://github.com/Fiandriananaprime/nova_ai",
   "bin": {
     "nova": "dist/cli/index.js",
     "nova-agent": "dist/cli/index.js"

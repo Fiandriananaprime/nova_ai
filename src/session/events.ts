@@ -10,6 +10,7 @@ export type NovaApprovalRequest =
 export type NovaCoreEvent =
   | { type: 'session'; session: PersistedSession }
   | { type: 'status'; sessionId: string; state: SessionStatus; detail: string; at: string }
+  | { type: 'activity'; sessionId: string; text: string }
   | { type: 'read'; sessionId: string; path: string }
   | { type: 'write'; sessionId: string; path: string }
   | { type: 'summary'; sessionId: string; text: string }

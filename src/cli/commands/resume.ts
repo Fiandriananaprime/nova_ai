@@ -40,7 +40,7 @@ export async function resumeCommand(sessionId: string, projectInput = '.', provi
 
   const lastWaiting = [...session.exchanges].reverse().find((entry) => entry.state === 'WAITING_FOR_RESPONSE');
   const deliveryMayBeUncertain = session.state === 'WAITING_FOR_RESPONSE'
-    || /BROWSER_RESPONSE_TIMEOUT|BROWSER_RESPONSE_TRUNCATED|BROWSER_SELECTOR_MISMATCH|AI_JSON_INVALID|AI_PROTOCOL_INVALID|AI_RESPONSE_EMPTY|AI_RESPONSE_TOO_LARGE/.test(session.error ?? '');
+    || /SESSION_CANCELLED|BROWSER_RESPONSE_TIMEOUT|BROWSER_RESPONSE_TRUNCATED|BROWSER_SELECTOR_MISMATCH|AI_JSON_INVALID|AI_PROTOCOL_INVALID|AI_RESPONSE_EMPTY|AI_RESPONSE_TOO_LARGE/.test(session.error ?? '');
   if (lastWaiting && deliveryMayBeUncertain) {
     console.log('La dernière demande a peut-être été envoyée, mais sa réponse n’a pas été confirmée ou validée. Vérifie la fenêtre Edge pour éviter un doublon.');
     if (!await confirm('Continuer et renvoyer la requête en attente ?')) return;

@@ -3,6 +3,17 @@ import { launchEdge } from './edge.js';
 import { inspectChatGPTPage } from './page-inspector.js';
 import { NovaError } from '../utils/errors.js';
 
+export function isNewProviderConversation(previousUrl: string | undefined, currentUrl: string, hostname: string): boolean {
+  if (!previousUrl) return false;
+  try {
+    const previous = new URL(previousUrl);
+    const current = new URL(currentUrl);
+    return previous.hostname !== hostname || current.hostname !== hostname || previous.pathname !== current.pathname;
+  } catch {
+    return true;
+  }
+}
+
 export class EdgeSession {
   private browser: Browser | undefined;
   private context: BrowserContext | undefined;

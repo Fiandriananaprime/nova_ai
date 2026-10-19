@@ -12,7 +12,7 @@ export function extractJson(raw: string): string {
   return candidate;
 }
 
-export function parseAIResponse(raw: string): AIResponse {
+export function parseAIResponse(raw: string, expectedMessageId?: string): AIResponse {
   let parsed: unknown;
   try { parsed = JSON.parse(extractJson(raw)); }
   catch (error) {
@@ -21,5 +21,8 @@ export function parseAIResponse(raw: string): AIResponse {
   }
   const result = AIResponseSchema.safeParse(parsed);
   if (!result.success) throw new NovaError(`Réponse incompatible avec nova-agent/1 : ${result.error.issues.map((issue: { message: string }) => issue.message).join('; ')}`, 'AI_PROTOCOL_INVALID');
+  if (expectedMessageId && result.data.acknowledgedMessageId !== expectedMessageId) {
+    throw new NovaError(`Accusé de message invalide : Nova attendait ${expectedMessageId}, mais a reçu ${result.data.acknowledgedMessageId}.`, 'AI_MESSAGE_ACK_INVALID');
+  }
   return result.data;
 }
