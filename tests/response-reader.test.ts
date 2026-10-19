@@ -24,6 +24,14 @@ describe('extractProtocolResponse', () => {
     expect(extractProtocolResponseAfterOutgoingMessage([staleReply], 'msg-2')).toBe('');
   });
 
+  it('extracts the current response from a following conversation turn when assistant selectors miss it', () => {
+    const renderedTurn = 'Réponse:\\n' + reply({ summary: 'current turn' }, 'msg-2');
+    const result = extractProtocolResponseAfterOutgoingMessage([renderedTurn], 'msg-2');
+
+    expect(JSON.parse(result).acknowledgedMessageId).toBe('msg-2');
+    expect(JSON.parse(result).summary).toBe('current turn');
+  });
+
   it('never invokes unanchored page fallback after the outgoing message is located', async () => {
     const fallback = async () => ['{"protocol":"nova-agent/1","status":"FILE_RECEIVED","acknowledgedMessageId":"msg-2","patch":"<unified git patch>"}'];
     const result = await selectResponseCandidates(true, [], fallback);
