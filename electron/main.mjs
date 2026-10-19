@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
 import { runFix } from '../dist/session/orchestrator.js';
 import { terminatePersistentEdge } from '../dist/browser/edge.js';
+import { navigateToNewProviderChat } from '../dist/browser/new-chat.js';
 import { appendSteeringMessage } from '../dist/session/steering.js';
 import { ensureProjectInitialized } from '../dist/context/project-setup.js';
 import { refreshTree } from '../dist/context/tree.js';
@@ -20,6 +21,7 @@ let activeTaskPromise;
 let quittingAfterTask = false;
 let currentProjectRoot;
 let currentProviderId;
+let forceNextInitialPrompt = false;
 let activeSessionId;
 let activeAbortController;
 const pendingApprovals = new Map();
@@ -153,6 +155,23 @@ ipcMain.handle('nova:refresh-tree', async (_event, root) => {
   const { tree, scan } = await refreshTree(projectRoot);
   return { tree, files: scan.entries.map(e => ({ path: e.path, type: e.type })) };
 });
+ipcMain.handle('nova:new-chat', async (_event, input) => {
+  if (activeTask) throw new Error('Arrête ou termine la tâche Nova avant de démarrer un nouveau chat.');
+  const providerId = input?.providerId;
+  if (typeof providerId !== 'string' || !allowedProviders.has(providerId)) throw new Error('Fournisseur invalide pour le nouveau chat.');
+  let browserConfig = { channel: 'msedge', timeoutMs: 120000 };
+  if (input?.projectRoot) {
+    const projectRoot = validateProjectRoot(input.projectRoot);
+    const config = await loadConfig(projectRoot);
+    browserConfig = config.browser;
+    currentProjectRoot = projectRoot;
+  }
+  if (currentProviderId && currentProviderId !== providerId) await terminatePersistentEdge();
+  currentProviderId = providerId;
+  await navigateToNewProviderChat(providerId, browserConfig.channel, browserConfig.timeoutMs);
+  forceNextInitialPrompt = true;
+  return { ok: true, providerId };
+});
 ipcMain.handle('nova:run-task', async (_event, input) => {
   if (activeTask) throw new Error('Une tâche Nova est déjà en cours.');
   const projectRoot = validateProjectRoot(input?.projectRoot);
@@ -162,6 +181,8 @@ ipcMain.handle('nova:run-task', async (_event, input) => {
   const initCommand = rawProblem.match(/^\/init(?:\s+([\s\S]+))?$/i);
   if (initCommand && !initCommand[1]?.trim()) throw new Error('Utilisation : /init suivi de ta demande pour initialiser une nouvelle discussion.');
   const problem = initCommand ? initCommand[1].trim() : rawProblem;
+  const forceInitialPrompt = Boolean(initCommand) || forceNextInitialPrompt;
+  forceNextInitialPrompt = false;
   activeTask = true;
   activeAbortController = new AbortController();
   const controller = activeAbortController;
@@ -172,7 +193,7 @@ ipcMain.handle('nova:run-task', async (_event, input) => {
       || (currentProviderId && currentProviderId !== providerId)) await terminatePersistentEdge();
     currentProjectRoot = projectRoot;
     currentProviderId = providerId;
-    const session = await runFix({ projectRoot, problem, providerId, noApply: false, signal: controller.signal, forceInitialPrompt: Boolean(initCommand), callbacks: {
+    const session = await runFix({ projectRoot, problem, providerId, noApply: false, signal: controller.signal, forceInitialPrompt, callbacks: {
       onEvent: event => {
         if (event.type === 'session') activeSessionId = event.session.id;
         send('nova:event', event);

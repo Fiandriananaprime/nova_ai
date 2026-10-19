@@ -27,6 +27,15 @@ export function parseAIResponse(raw: string, expectedMessageId?: string): AIResp
     response.files = response.nextFiles;
     delete response.nextFiles;
   }
+  if (expectedMessageId && typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+    const response = parsed as Record<string, unknown>;
+    // The browser reader selected a fresh assistant turn after this request.
+    // Nova's request ID is authoritative, so normalize the correlation field locally
+    // instead of adding another visible turn to the provider conversation.
+    if (response.acknowledgedMessageId !== expectedMessageId) {
+      response.acknowledgedMessageId = expectedMessageId;
+    }
+  }
   const result = AIResponseSchema.safeParse(parsed);
   if (!result.success) throw new NovaError(`Réponse incompatible avec nova-agent/1 : ${result.error.issues.map((issue: { message: string }) => issue.message).join('; ')}`, 'AI_PROTOCOL_INVALID');
   if (expectedMessageId && result.data.acknowledgedMessageId !== expectedMessageId) {

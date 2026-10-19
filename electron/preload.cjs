@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const api = Object.freeze({
   pickProject: () => ipcRenderer.invoke('nova:pick-project'),
   refreshTree: root => ipcRenderer.invoke('nova:refresh-tree', root),
+  newChat: input => ipcRenderer.invoke('nova:new-chat', input),
   runTask: input => ipcRenderer.invoke('nova:run-task', input),
   steerTask: input => ipcRenderer.invoke('nova:steer', input),
   stopTask: () => ipcRenderer.invoke('nova:stop-task'),

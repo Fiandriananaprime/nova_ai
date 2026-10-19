@@ -18,7 +18,7 @@ export const AIResponseSchema = z.object({
   summary: z.string().max(10000).optional(),
   patch: z.string().max(8 * 1024 * 1024).optional(),
   tests: z.array(z.string().max(2000)).max(50).optional(),
-}).strict().superRefine((value, ctx) => {
+}).strip().superRefine((value, ctx) => {
   if (value.nextStatus && value.status !== 'FILE_RECEIVED') ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'nextStatus est uniquement autorisé après FILE_RECEIVED.' });
   const effectiveStatus = value.nextStatus ?? value.status;
   if (effectiveStatus === 'NEED_FILES' && (!value.files || value.files.length === 0)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NEED_FILES exige au moins un chemin dans files.' });

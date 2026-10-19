@@ -46,6 +46,7 @@ nova-agent/
 │   │   │   └── web-providers.ts
 │   │   ├── diagnostics.ts
 │   │   ├── edge.ts
+│   │   ├── new-chat.ts
 │   │   ├── page-inspector.ts
 │   │   ├── response-reader.ts
 │   │   └── session.ts
@@ -119,6 +120,7 @@ nova-agent/
 │   ├── mock-provider.test.ts
 │   ├── patch-apply.test.ts
 │   ├── protocol.test.ts
+│   ├── response-reader.test.ts
 │   ├── security.test.ts
 │   └── session-persistence.test.ts
 ├── .gitignore

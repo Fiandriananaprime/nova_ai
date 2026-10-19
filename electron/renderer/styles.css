@@ -63,6 +63,9 @@ kbd { padding: 2px 4px; border: 1px solid #3a3b42; border-radius: 4px; color: #7
 .main-tabs { height: 40px; flex: 0 0 40px; display: flex; align-items: center; gap: 15px; padding: 0 16px; border-bottom: 1px solid var(--line); }
 .tab { height: 40px; display: flex; align-items: center; gap: 8px; border-bottom: 2px solid var(--accent); font-size: 12px; }
 .tab-icon { color: var(--accent); font-size: 15px; }
+.new-chat-button { padding: 6px 10px; border: 1px solid #383a41; border-radius: 6px; background: #1b1c20; color: #c7c8cf; font-size: 10px; font-weight: 650; cursor: pointer; }
+.new-chat-button:hover:not(:disabled) { border-color: #59694e; background: #22251f; color: var(--accent); }
+.new-chat-button:disabled { opacity: .5; cursor: not-allowed; }
 .tab-close { margin-left: 6px; color: #71737d; }
 .main-status { display: flex; align-items: center; gap: 7px; margin-left: auto; overflow: hidden; color: #858791; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .status-dot { width: 6px; height: 6px; }

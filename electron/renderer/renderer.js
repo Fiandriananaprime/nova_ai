@@ -13,6 +13,7 @@ function toast(message) {
 function setStatus(text, running = state.running) {
   $('status-text').textContent = text;
   $('send-task').disabled = running || !state.projectRoot;
+  $('new-chat').disabled = running;
   $('send-task').innerHTML = running ? 'Nova travaille <span class="spinner"></span>' : 'Envoyer <span>↑</span>';
   $('steer-task').classList.toggle('hidden', !running);
   $('steer-task').disabled = !running || !state.sessionId;
@@ -113,6 +114,29 @@ function addActivity(text) {
 }
 
 function setFiles(files) { state.files = files || []; renderTree(state.files); }
+function resetAgentChat() {
+  state.sessionId = null;
+  state.running = false;
+  state.waitingForResponse = false;
+  state.pendingPatch = null;
+  state.selectedFile = null;
+  state.changes.clear();
+  $('conversation').replaceChildren();
+  $('welcome').classList.remove('hidden');
+  $('session-info').textContent = 'Nouvelle conversation';
+  $('task-input').value = '';
+  $('approval-panel').replaceChildren();
+  $('approval-panel').classList.add('hidden');
+  $('diff-count').textContent = '0';
+  $('change-list').innerHTML = '<div class="diff-empty"><div class="diff-empty-icon">⇄</div><strong>Aucun changement pour le moment</strong><p>Les fichiers modifiés par Nova apparaîtront ici avec leur diff avant/après.</p></div>';
+  $('diff-view').innerHTML = '<div class="diff-empty"><div class="diff-empty-icon">⌁</div><strong>Le diff apparaîtra ici</strong><p>Lance une tâche et sélectionne un fichier modifié.</p></div>';
+  $('change-list').classList.remove('hidden');
+  $('diff-view').classList.add('hidden');
+  document.querySelectorAll('.diff-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.diffTab === 'changes'));
+  state.diffTab = 'changes';
+  renderTree(state.files);
+  setStatus(state.projectRoot ? 'Nouveau chat' : 'En attente', false);
+}
 function updateChange(filePath, detail = {}) {
   const old = state.changes.get(filePath) || {};
   state.changes.set(filePath, { ...old, ...detail, path: filePath });
@@ -243,6 +267,21 @@ async function openProject() {
 
 $('open-project').addEventListener('click', openProject);
 $('open-project-sidebar').addEventListener('click', openProject);
+$('new-chat').addEventListener('click', async () => {
+  if (state.running) return;
+  const button = $('new-chat');
+  button.disabled = true;
+  try {
+    await window.novaDesktop.newChat({ projectRoot: state.projectRoot, providerId: $('provider').value });
+    resetAgentChat();
+    toast('Nouveau chat prêt dans Nova et chez le fournisseur IA.');
+    $('task-input').focus();
+  } catch (error) {
+    toast(`Impossible de démarrer un nouveau chat : ${error.message}`);
+  } finally {
+    button.disabled = state.running;
+  }
+});
 $('refresh-tree').addEventListener('click', async () => {
   if (!state.projectRoot) return;
   try { const result = await window.novaDesktop.refreshTree(state.projectRoot); setFiles(result.files); toast('Arborescence actualisée.'); }

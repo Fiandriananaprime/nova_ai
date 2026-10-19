@@ -149,10 +149,12 @@ export async function sendAndReadLastAssistant(
 
   const assistant = selectors.assistantMessage ? page.locator(selectors.assistantMessage) : undefined;
   const beforeAssistantCount = assistant ? await assistant.count() : 0;
+  const beforeLatestAssistantText = assistant
+    ? await assistant.last().innerText({ timeout: 1000 }).catch(() => '')
+    : '';
   const userMessages = selectors.userMessage ? page.locator(selectors.userMessage) : undefined;
   const beforeUserCount = userMessages ? await userMessages.count() : 0;
   const beforeMainText = await readPageText(page);
-  const beforeAcknowledgedMessageId = extractAcknowledgedMessageId(beforeMainText);
   let filled = false;
   for (let attempt = 0; attempt < 3 && !filled; attempt += 1) {
     try {
@@ -240,27 +242,49 @@ export async function sendAndReadLastAssistant(
   let wrongAckPolls = 0;
   let previous = '';
   let stableCount = 0;
+  let previousInvalidReply = '';
+  let stableInvalidReplyCount = 0;
 
   while (Date.now() < hardDeadline && Date.now() - lastActivity < timeoutMs) {
     await throwIfAborted(page, selectors, signal);
     const candidates = await readResponseCandidates(page, assistant, beforeAssistantCount);
+    const latestAssistantText = assistant
+      ? await assistant.last().innerText({ timeout: 1000 }).catch(() => '')
+      : '';
+    const assistantReplyChanged = Boolean(latestAssistantText.trim())
+      && latestAssistantText !== beforeLatestAssistantText;
     let text = '';
     for (const candidate of candidates) {
       text = extractProtocolResponse(candidate, expectedMessageId);
       if (text) break;
     }
     let wrongAck: string | undefined;
-    if (!text) {
-      for (const candidate of candidates) {
-        const acknowledged = extractAcknowledgedMessageId(candidate);
-        if (acknowledged) {
-          if (acknowledged !== beforeAcknowledgedMessageId && acknowledged !== expectedMessageId) wrongAck = acknowledged;
-          break;
-        }
+    if (!text && assistantReplyChanged) {
+      const acknowledged = extractAcknowledgedMessageId(latestAssistantText);
+      const latestProtocolResponse = extractProtocolResponse(latestAssistantText);
+      if (latestProtocolResponse && acknowledged && acknowledged !== expectedMessageId) {
+        wrongAck = acknowledged;
       }
     }
     responseStarted ||= Boolean(text);
     const stop = Boolean(await findFirstVisible(page, selectors.stopButton));
+
+    // A completed assistant turn that changed but contains no protocol object is
+    // a protocol violation. Return it to the orchestrator so it can ask the model
+    // to correct the same request instead of waiting for the full response timeout.
+    if (!text && assistantReplyChanged && !stop) {
+      if (latestAssistantText === previousInvalidReply) stableInvalidReplyCount += 1;
+      else {
+        previousInvalidReply = latestAssistantText;
+        stableInvalidReplyCount = 1;
+      }
+      if (stableInvalidReplyCount >= 3) {
+        throw new NovaError('Réponse incompatible avec nova-agent/1 : aucun objet JSON de protocole valide détecté.', 'AI_PROTOCOL_INVALID');
+      }
+    } else {
+      previousInvalidReply = '';
+      stableInvalidReplyCount = 0;
+    }
 
     const signature = `${candidates[0]?.length ?? 0}:${text.length}`;
     if (stop || signature !== lastSignature) lastActivity = Date.now();

@@ -149,7 +149,11 @@ async function readRequestedFile(
 const MAX_LINES_PER_FILE_CHUNK = 300;
 const MAX_BYTES_PER_FILE_CHUNK = 12 * 1024;
 const MAX_PROTOCOL_REPAIR_ATTEMPTS = 2;
-const REPAIRABLE_RESPONSE_CODES = new Set(['AI_JSON_INVALID', 'AI_PROTOCOL_INVALID', 'AI_MESSAGE_ACK_INVALID']);
+const REPAIRABLE_RESPONSE_CODES = new Set([
+  'AI_JSON_INVALID', 'AI_PROTOCOL_INVALID',
+  'PATCH_EMPTY', 'PATCH_FORMAT_INVALID', 'PATCH_HEADER_INVALID', 'PATCH_PATH_INVALID',
+  'PATCH_PATH_MISMATCH', 'PATCH_RENAME_UNSUPPORTED', 'PATCH_DUPLICATE_PATH', 'PATCH_APPLY_CHECK_FAILED',
+]);
 
 interface FileChunk { content: string; firstLine: number; lastLine: number; lineCount: number; }
 
@@ -365,6 +369,12 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         while (true) {
           try {
             response = await provider.send(repairRequest);
+            // Validate PATCH_READY before leaving the repair loop. JSON validity
+            // alone does not guarantee that the patch field contains a git diff.
+            if (response.status === 'PATCH_READY'
+              || response.status === 'FILE_RECEIVED' && response.nextStatus === 'PATCH_READY') {
+              await validatePatch(projectRoot, response.patch!, session.fileHashes, config.patches.maxPatchBytes);
+            }
             break;
           } catch (error) {
             const issue = asNovaError(error);
@@ -373,7 +383,8 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
             renderStatus('PROTOCOL_REPAIR', `RÃ©ponse invalide, correction demandÃ©e (${attempt}/${MAX_PROTOCOL_REPAIR_ATTEMPTS})`);
             const correctedRequest = {
               ...request,
-              message: `Nova a rejetÃ© ta rÃ©ponse prÃ©cÃ©dente pour cette mÃªme requÃªte. Erreur de validation (${issue.code}) : ${issue.message}\n\nCorrige immÃ©diatement ta rÃ©ponse en renvoyant un seul objet JSON valide conforme Ã  nova-agent/1. Respecte exactement le messageId du paquet initial. Ne recommence pas l'analyse et ne redemande pas les fichiers dÃ©jÃ  reÃ§us ; corrige uniquement la forme ou les champs signalÃ©s.`,
+              messageId: randomUUID(),
+              message: `Nova a rejetÃ© ta rÃ©ponse prÃ©cÃ©dente pour cette mÃªme requÃªte. Erreur de validation (${issue.code}) : ${issue.message}\n\nCorrige immÃ©diatement ta rÃ©ponse en renvoyant un seul objet JSON valide conforme Ã  nova-agent/1. Utilise le messageId du paquet de correction courant. Ne recommence pas l'analyse et ne redemande pas les fichiers dÃ©jÃ  reÃ§us ; corrige uniquement la forme ou les champs signalÃ©s.`,
               projectContext: '',
               includeGeneralPrompt: false,
               forceInitialPrompt: false,
@@ -415,25 +426,23 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
       }
       await saveSession(session);
 
-      if (session.fileTransferActive && response.status === 'NEED_FILES') {
-        const currentPath = session.fileTransferCurrentPath;
-        const currentHash = currentPath ? session.fileTransferHashes?.[currentPath] : undefined;
-        if (currentPath && currentHash && session.fileTransferKind === 'project-file'
-          && session.fileTransferChunkIndex === session.fileTransferChunkTotal) {
-          session.transmittedFileHashes[currentPath] = currentHash;
-        }
-        session.fileTransferActive = false;
-        delete session.fileTransferKind;
-        delete session.fileTransferCurrentPath;
-        delete session.fileTransferChunkIndex;
-        delete session.fileTransferChunkTotal;
-        delete session.fileTransferQueue;
-        delete session.fileTransferHashes;
-        delete session.fileTransferTotal;
-        delete session.fileTransferSummary;
-        outgoingFiles = [];
+      // Some providers correctly ask for a file while failing to emit the required
+      // FILE_RECEIVED envelope. If they name the file currently being transferred,
+      // treat that as an implicit acknowledgement and advance instead of restarting
+      // the same file at chunk 1 (which can create an endless resend loop).
+      if (session.fileTransferActive && response.status === 'NEED_FILES'
+        && session.fileTransferCurrentPath
+        && response.files?.includes(session.fileTransferCurrentPath)) {
+        renderStatus('FILE_RECEIVED', `${session.fileTransferCurrentPath} · segment ${session.fileTransferChunkIndex ?? 1} reconnu dans la demande suivante`);
+        response = {
+          ...response,
+          status: 'FILE_RECEIVED',
+          receivedFile: session.fileTransferCurrentPath,
+          chunkIndex: session.fileTransferChunkIndex ?? 1,
+        };
       }
 
+      let deferredFileRequests: string[] = [];
       if (session.fileTransferActive && response.status === 'FILE_RECEIVED' && response.nextStatus) {
         const currentPath = session.fileTransferCurrentPath;
         const expectedChunkIndex = session.fileTransferChunkIndex ?? 1;
@@ -441,6 +450,15 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
         if (!currentPath || response.receivedFile !== currentPath || response.chunkIndex !== expectedChunkIndex) {
           throw new NovaError('Accuse de reception invalide: Nova attendait FILE_RECEIVED pour le fichier courant.', 'FILE_TRANSFER_ACK_INVALID');
         }
+        if (response.nextStatus === 'NEED_FILES') {
+          // Finish the queued transfer first. Clearing it here would restart
+          // already requested files from chunk 1 on every compound NEED_FILES.
+          deferredFileRequests = response.files ?? [];
+          if (deferredFileRequests.length) {
+            session.fileTransferSummary = `${session.fileTransferSummary ?? ''}\nAdditional files requested by the assistant: ${deferredFileRequests.join(', ')}`;
+          }
+          response = { ...response, status: 'FILE_RECEIVED', nextStatus: undefined };
+        } else {
         if (currentHash && session.fileTransferKind === 'project-file'
           && expectedChunkIndex === session.fileTransferChunkTotal) {
           session.transmittedFileHashes[currentPath] = currentHash;
@@ -463,6 +481,7 @@ export async function runFix(options: FixOptions): Promise<PersistedSession> {
           continue;
         }
         response = { ...response, status: response.nextStatus, nextStatus: undefined };
+        }
       }
 
       if (session.fileTransferActive) {
