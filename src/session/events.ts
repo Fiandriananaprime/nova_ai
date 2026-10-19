@@ -1,11 +1,11 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { PersistedSession, SessionStatus } from './persistence.js';
 
+export type NovaApprovalDecision = 'approve' | 'reject' | 'approve-session';
 export type NovaApprovalRequest =
   | { kind: 'command'; command: string; reason: string; cwd: string; sessionId: string }
   | { kind: 'patch'; operationId: string; summary: string; files: Array<{ path: string; additions: number; deletions: number }>; diff: string; reportPath: string; sessionId: string }
   | { kind: 'sensitive-file'; path: string; reason: string; sessionId: string };
-
-export type NovaApprovalDecision = 'approve' | 'reject' | 'approve-session';
 
 export type NovaCoreEvent =
   | { type: 'session'; session: PersistedSession }
@@ -26,6 +26,23 @@ export interface NovaCoreCallbacks {
   isCancelled?: () => boolean;
 }
 
-export function emitNovaEvent(callbacks: NovaCoreCallbacks | undefined, event: NovaCoreEvent): void {
-  try { callbacks?.onEvent?.(event); } catch { /* UI listeners must not break core safety or persistence. */ }
+const callbackStorage = new AsyncLocalStorage<NovaCoreCallbacks>();
+export function withNovaCoreCallbacks<T>(callbacks: NovaCoreCallbacks | undefined, task: () => Promise<T>): Promise<T> {
+  return callbackStorage.run(callbacks ?? {}, task);
+}
+export function getNovaCoreCallbacks(): NovaCoreCallbacks | undefined { return callbackStorage.getStore(); }
+export function emitNovaEvent(event: NovaCoreEvent): void {
+  try { callbackStorage.getStore()?.onEvent?.(event); } catch { /* Renderer listeners cannot break core execution. */ }
+}
+export async function requestNovaApproval(request: NovaApprovalRequest): Promise<NovaApprovalDecision | undefined> {
+  const callbacks = callbackStorage.getStore();
+  if (!callbacks?.requestApproval) return undefined;
+  emitNovaEvent({ type: 'approval-request', request });
+  return callbacks.requestApproval(request);
+}
+export async function requestNovaAnswer(question: string, sessionId: string): Promise<string | null | undefined> {
+  const callbacks = callbackStorage.getStore();
+  if (!callbacks?.requestAnswer) return undefined;
+  emitNovaEvent({ type: 'question', sessionId, question });
+  return callbacks.requestAnswer(question, sessionId);
 }
