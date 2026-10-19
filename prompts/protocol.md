@@ -1,6 +1,6 @@
 # Protocol `nova-agent/1`
 
-Every model response is one JSON object, validated by Zod before the orchestration layer uses it.
+Every model response is one JSON object, validated by Zod before the orchestration layer uses it. The `protocol` field must be exactly `nova-agent/1`; `nova-agent/v1` is invalid.
 
 While a response is being prepared, Nova may append a new user steering instruction to the current task. Re-evaluate the answer using that guidance before returning a final status. Steering does not change the JSON schema and is not file content.
 

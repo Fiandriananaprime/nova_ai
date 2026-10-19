@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { extractProtocolResponse, extractProtocolResponseAfterOutgoingMessage, isCredibleInvalidReplyCandidate, selectResponseCandidates } from '../src/browser/response-reader.js';
+import { CHATGPT_SELECTORS } from '../src/browser/selectors/chatgpt.js';
 
 const reply = (extra: Record<string, unknown> = {}, id = 'msg-2') => JSON.stringify({
   protocol: 'nova-agent/1', status: 'DONE', acknowledgedMessageId: id, ...extra,
+});
+
+describe('ChatGPT current DOM selectors', () => {
+  it('recognizes the user bubble and assistant reveal markers in the saved HTML', () => {
+    expect(CHATGPT_SELECTORS.userMessage).toContain('[data-user-message-bubble="true"]');
+    expect(CHATGPT_SELECTORS.assistantMessage).toContain('[data-d-inline-reveal][data-dil-message-id]');
+  });
 });
 
 describe('invalid reply candidate detection', () => {
@@ -20,6 +28,15 @@ describe('invalid reply candidate detection', () => {
 });
 
 describe('extractProtocolResponse', () => {
+  it('normalizes the observed nova-agent/v1 typo only for the matching message ID', () => {
+    const malformedVersion = JSON.stringify({ protocol: 'nova-agent/v1', status: 'DONE', acknowledgedMessageId: 'msg-2' });
+    const extracted = extractProtocolResponse(malformedVersion, 'msg-2');
+
+    expect(JSON.parse(extracted).protocol).toBe('nova-agent/1');
+    expect(JSON.parse(extracted).acknowledgedMessageId).toBe('msg-2');
+    expect(extractProtocolResponse(malformedVersion, 'msg-1')).toBe('');
+  });
+
   it('returns the reply for the expected message id and ignores a stale one', () => {
     const page = `${reply({}, 'msg-1')}\n---\n${reply({}, 'msg-2')}`;
     expect(JSON.parse(extractProtocolResponse(page, 'msg-2')).acknowledgedMessageId).toBe('msg-2');

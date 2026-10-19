@@ -16,6 +16,10 @@ describe('protocol parser', () => {
     expect(() => parseAIResponse('Here is the answer: {"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"DONE"}')).toThrow();
   });
 
+  it('rejects the non-canonical protocol alias outside the browser compatibility layer', () => {
+    expect(() => parseAIResponse(JSON.stringify({ protocol: 'nova-agent/v1', acknowledgedMessageId: 'msg-1', status: 'DONE' }))).toThrow();
+  });
+
   it('rejects unknown status and NEED_INFO without a question', () => {
     expect(() => parseAIResponse('{"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"MAGIC"}')).toThrow();
     expect(() => parseAIResponse('{"protocol":"nova-agent/1","acknowledgedMessageId":"msg-1","status":"NEED_INFO"}')).toThrow();

@@ -10,6 +10,6 @@ export const CHATGPT_SELECTORS = {
   ],
   sendButton: ['button[data-testid="send-button"]', 'button[data-testid="composer-submit-button"]', 'button[aria-label*="Send"]', 'button[aria-label*="Envoyer"]'],
   stopButton: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop generating"]', 'button[aria-label*="Arrêter la génération"]'],
-  assistantMessage: '[data-message-author-role="assistant"]',
-  userMessage: '[data-message-author-role="user"]',
+  assistantMessage: '[data-message-author-role="assistant"], [data-d-inline-reveal][data-dil-message-id]',
+  userMessage: '[data-message-author-role="user"], [data-user-message-bubble="true"]',
 };

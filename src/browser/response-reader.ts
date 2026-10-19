@@ -51,7 +51,7 @@ function parseProtocolObject(json: string): Record<string, unknown> | undefined 
   try {
     const value: unknown = JSON.parse(json);
     if (typeof value === 'object' && value !== null && !Array.isArray(value)
-      && 'protocol' in value && value.protocol === 'nova-agent/1'
+      && 'protocol' in value && (value.protocol === 'nova-agent/1' || value.protocol === 'nova-agent/v1')
       && 'status' in value && typeof value.status === 'string' && STATUSES.has(value.status)) return value as Record<string, unknown>;
   } catch { /* Not a complete protocol object; the caller tries another candidate. */ }
   return undefined;
@@ -72,7 +72,13 @@ export function extractProtocolResponse(text: string, expectedMessageId?: string
       const object = readBalancedObject(text, start);
       if (object && object.end > protocolKey) {
         const value = parseProtocolObject(object.json);
-        if (value && (!expectedMessageId || value.acknowledgedMessageId === expectedMessageId)) return object.json;
+        if (value && (!expectedMessageId || value.acknowledgedMessageId === expectedMessageId)) {
+          // ChatGPT can emit the observed "nova-agent/v1" typo. Normalize only this exact
+          // alias after the response is anchored and its acknowledgement matches; the
+          // shared protocol parser remains strict for every other entry point.
+          if (value.protocol === 'nova-agent/v1') return JSON.stringify({ ...value, protocol: 'nova-agent/1' });
+          return object.json;
+        }
       }
       start = start === 0 ? -1 : text.lastIndexOf('{', start - 1);
     }
