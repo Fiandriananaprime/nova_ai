@@ -92,12 +92,12 @@ export async function runPatchInNormalizedWorkspace(
       useZeroContext = check.exitCode === 0;
     }
     if (check.exitCode !== 0) {
-      return { exitCode: check.exitCode, stdout: check.stdout, stderr: check.stderr };
+      return { exitCode: check.exitCode ?? null, stdout: check.stdout, stderr: check.stderr };
     }
     if (checkOnly) return { exitCode: 0, stdout: check.stdout, stderr: check.stderr };
 
     const applied = await run(['apply', ...(useZeroContext ? ['--unidiff-zero'] : []), '--whitespace=nowarn', '-']);
-    if (applied.exitCode !== 0) return { exitCode: applied.exitCode, stdout: applied.stdout, stderr: applied.stderr };
+    if (applied.exitCode !== 0) return { exitCode: applied.exitCode ?? null, stdout: applied.stdout, stderr: applied.stderr };
 
     const outputs = new Map<string, Buffer | null>();
     for (const file of files) {
