@@ -62,7 +62,7 @@ describe('patch validation and reversible application', () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'nova-agent-patch-'));
     await writeFile(path.join(root, '.novaignore'), DEFAULT_NOVAIGNORE);
     const file = path.join(root, 'README.md');
-    const original = '# Nova Agent\\r\\n\\r\\n**Nova Agent** est un agent local.\\r\\n';
+    const original = '# Nova Agent\r\n\r\n**Nova Agent** est un agent local.\r\n';
     await writeFile(file, original, 'utf8');
     const hash = sha256(await readFile(file));
     const patch = [
@@ -76,13 +76,13 @@ describe('patch validation and reversible application', () => {
       '+',
       '+**Fiandriananaprime** — https://github.com/Fiandriananaprime',
       '',
-    ].join('\\n');
+    ].join('\n');
     const prepared = await validatePatch(root, patch, { 'README.md': hash });
     const applied = await applyPreparedPatch(root, 'operation-crlf-test', patch, prepared);
     const result = await readFile(file, 'utf8');
-    expect(result).toContain('## Propriétaire\\r\\n');
-    expect(result).toContain('**Nova Agent** est un agent local.\\r\\n');
-    expect(result.replaceAll('\\r\\n', '')).not.toContain('\\n');
+    expect(result).toContain('## Propriétaire\r\n');
+    expect(result).toContain('**Nova Agent** est un agent local.\r\n');
+    expect(result.replaceAll('\r\n', '')).not.toContain('\n');
     await restoreBackup(root, applied.backupPath, true, applied.afterHashes);
     expect(await readFile(file, 'utf8')).toBe(original);
   });
