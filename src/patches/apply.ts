@@ -1,11 +1,11 @@
 import path from 'node:path';
 import { lstat, readFile, mkdir, writeFile, rm } from 'node:fs/promises';
-import { execa } from 'execa';
 import { writeJson, readJson, sha256 } from '../utils/fs.js';
 import { NovaError } from '../utils/errors.js';
 import { assertNoSymlinkEscape, resolveInside } from '../security/paths.js';
 import { assertSafeOperationId } from '../security/agent-files.js';
 import type { PreparedPatch } from './validator.js';
+import { runPatchInNormalizedWorkspace } from './git-apply.js';
 
 interface BackupEntry { path: string; contentBase64: string | null; sha256: string | null; }
 interface BackupFile { operationId: string; createdAt: string; files: BackupEntry[]; }
@@ -37,12 +37,25 @@ export async function applyPreparedPatch(projectRoot: string, operationId: strin
   const backupPath = path.join(projectRoot, '.nova_agents', 'backups', `${operationId}.json`);
   await mkdir(path.dirname(backupPath), { recursive: true });
   await writeJson(backupPath, backup);
-  const apply = await execa('git', ['-c', 'core.autocrlf=false', 'apply', '--whitespace=nowarn', '-'], {
-    cwd: path.resolve(projectRoot), input: patch, reject: false, windowsHide: true, maxBuffer: 8 * 1024 * 1024,
-  });
-  if (apply.exitCode !== 0) {
+  const apply = await runPatchInNormalizedWorkspace(projectRoot, patch, files, false);
+  if (apply.exitCode !== 0 || !apply.outputs) {
     await restoreBackup(projectRoot, backupPath, false).catch(() => undefined);
     throw new NovaError(`L'application du patch a échoué : ${(apply.stderr || apply.stdout).trim()}`, 'PATCH_APPLY_FAILED');
+  }
+  try {
+    for (const item of files) {
+      const absolute = resolveInside(projectRoot, item.path);
+      const output = apply.outputs.get(item.path);
+      if (output === undefined) throw new NovaError(`Résultat absent pour le fichier patché : ${item.path}`, 'PATCH_APPLY_FAILED');
+      if (output === null) await rm(absolute, { force: true });
+      else {
+        await mkdir(path.dirname(absolute), { recursive: true });
+        await writeFile(absolute, output);
+      }
+    }
+  } catch (error) {
+    await restoreBackup(projectRoot, backupPath, false).catch(() => undefined);
+    throw error;
   }
   const afterHashes: Record<string, string | null> = {};
   for (const item of files) {
