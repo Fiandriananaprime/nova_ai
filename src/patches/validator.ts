@@ -1,11 +1,10 @@
-import path from 'node:path';
 import { lstat, readFile } from 'node:fs/promises';
-import { execa } from 'execa';
 import { assertAllowedProjectPath } from '../security/permissions.js';
 import { assertNoPotentialSecret } from '../security/secrets.js';
 import { sha256 } from '../utils/fs.js';
 import { NovaError } from '../utils/errors.js';
 import { normalizePatchHunkCounts, parsePatch, type PatchFile } from './parser.js';
+import { runPatchInNormalizedWorkspace } from './git-apply.js';
 
 export interface PreparedPatch { files: PatchFile[]; diff: string; originalHashes: Record<string, string | null>; }
 
@@ -38,9 +37,7 @@ export async function validatePatch(projectRoot: string, patch: string, readHash
     originalHashes[file.path] = actualHash;
   }
 
-  const check = await execa('git', ['-c', 'core.autocrlf=false', 'apply', '--check', '--whitespace=nowarn', '-'], {
-    cwd: path.resolve(projectRoot), input: normalizedPatch, reject: false, windowsHide: true, maxBuffer: 8 * 1024 * 1024,
-  });
+  const check = await runPatchInNormalizedWorkspace(projectRoot, normalizedPatch, files, true);
   if (check.exitCode !== 0) throw new NovaError(`Patch non applicable sans conflit : ${(check.stderr || check.stdout).trim()}`, 'PATCH_APPLY_CHECK_FAILED');
   return { files, diff: normalizedPatch, originalHashes };
 }
