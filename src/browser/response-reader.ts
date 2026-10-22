@@ -14,20 +14,13 @@ async function throwIfAborted(page: Page, selectors: WebProviderSelectors, signa
   throw new NovaError('La tâche a été arrêtée depuis Nova Desktop.', 'SESSION_CANCELLED');
 }
 
-/** Consecutive identical polls (~700 ms each) after which a valid reply is accepted even if the stop button never disappears. */
 const STABLE_POLLS_WITH_STOP_VISIBLE = 6;
-/** Consecutive polls showing a reply for another message id before failing fast instead of waiting for the timeout. */
 const STABLE_POLLS_FOR_WRONG_ACK = 4;
-/** Let short-lived streaming fragments settle before declaring the reply malformed. */
 const STABLE_POLLS_INVALID_REPLY_WITHOUT_STOP = 8;
-/** A stuck stop control must not allow a malformed reply to wait forever. */
 const STABLE_POLLS_INVALID_REPLY_WITH_STOP = 12;
-/** Max assistant nodes read per poll, newest first, to keep each poll cheap. */
 const MAX_ASSISTANT_NODES_READ = 5;
-/** Max `{` positions tried before one `"protocol"` key (the key is not always the first one in the object). */
 const MAX_OBJECT_START_CANDIDATES = 40;
 
-/** Returns the balanced `{…}` object starting at `start` and the index just after it, ignoring braces inside strings. */
 function readBalancedObject(text: string, start: number): { json: string; end: number } | undefined {
   let depth = 0;
   let inString = false;
@@ -53,15 +46,10 @@ function parseProtocolObject(json: string): Record<string, unknown> | undefined 
     if (typeof value === 'object' && value !== null && !Array.isArray(value)
       && 'protocol' in value && (value.protocol === 'nova-agent/1' || value.protocol === 'nova-agent/v1')
       && 'status' in value && typeof value.status === 'string' && STATUSES.has(value.status)) return value as Record<string, unknown>;
-  } catch { /* Not a complete protocol object; the caller tries another candidate. */ }
+  } catch {}
   return undefined;
 }
 
-/**
- * Finds the latest complete nova-agent/1 object in rendered page text.
- * Walks back from each `"protocol"` key over every enclosing `{`, so the reply is found
- * even when `protocol` is not the first key or nested objects precede it.
- */
 export function extractProtocolResponse(text: string, expectedMessageId?: string): string {
   let searchFrom = text.length;
   while (searchFrom >= 0) {
@@ -73,9 +61,6 @@ export function extractProtocolResponse(text: string, expectedMessageId?: string
       if (object && object.end > protocolKey) {
         const value = parseProtocolObject(object.json);
         if (value && (!expectedMessageId || value.acknowledgedMessageId === expectedMessageId)) {
-          // ChatGPT can emit the observed "nova-agent/v1" typo. Normalize only this exact
-          // alias after the response is anchored and its acknowledgement matches; the
-          // shared protocol parser remains strict for every other entry point.
           if (value.protocol === 'nova-agent/v1') return JSON.stringify({ ...value, protocol: 'nova-agent/1' });
           return object.json;
         }
@@ -101,10 +86,6 @@ async function readPageText(page: Page, timeout?: number): Promise<string> {
   return page.locator('body').innerText(timeout ? { timeout } : undefined).catch(() => '');
 }
 
-/**
- * Read newly added assistant nodes, then the latest assistant node for virtualised chat
- * lists. Never scrape the whole page: it contains the outgoing prompt and protocol examples.
- */
 async function readResponseCandidates(
   page: Page,
   assistant: Locator | undefined,
@@ -130,7 +111,6 @@ async function readResponseCandidates(
 }
 
 
-/** Do not use unanchored fallback text once the current outgoing user message was found. */
 export async function selectResponseCandidates(
   userMessageFound: boolean,
   anchoredCandidates: string[],
@@ -140,14 +120,7 @@ export async function selectResponseCandidates(
   return readFallbackCandidates();
 }
 
-/**
- * A one-character generic sibling is often a transient accessibility/streaming artifact,
- * not an actual assistant answer. Dedicated assistant nodes are stronger evidence, but
- * their contents still have to remain stable across several polls before failing.
- */
 export function isCredibleInvalidReplyCandidate(text: string, hasDedicatedAssistantNode: boolean): boolean {
-  // Generic following-turn siblings can be buttons, status labels, or streaming placeholders.
-  // Only actual assistant/protocol nodes are sufficient evidence of a malformed reply.
   return hasDedicatedAssistantNode && Boolean(text.trim());
 }
 
@@ -160,11 +133,6 @@ interface AnchoredResponseSnapshot {
   followingTurnTexts: string[];
 }
 
-/**
- * Locate the exact outgoing user message by its message ID, then read assistant
- * nodes and conversation turns rendered below it. Geometry is used where available
- * because a provider can reorder DOM nodes without changing visual conversation order.
- */
 async function readAssistantMessagesAfterOutgoingMessage(
   page: Page,
   selectors: WebProviderSelectors,
@@ -178,7 +146,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
     : [];
 
   return page.locator('body').evaluate((body, options) => {
-    // page.evaluate runs in the browser context and cannot access module-scope constants.
     const maxAssistantNodesRead = 5;
     const main = body.querySelector('main');
     const root = main ?? body;
@@ -194,7 +161,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
           try {
             scope.querySelectorAll(selector).forEach((element) => found.add(element));
           } catch {
-            // One provider selector can become invalid after a UI update; try the rest.
           }
         }
       }
@@ -210,8 +176,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
     let outgoing = userNodes.filter((element) => textOf(element).includes(options.expectedMessageId)).at(-1);
     const matchedUserSelector = Boolean(outgoing);
 
-    // Provider selectors are best-effort. If they miss the user bubble, anchor to the
-    // smallest rendered element containing the ID sent in this request.
     if (!outgoing) {
       const genericMatches = Array.from(root.querySelectorAll('*')).filter((element) => {
         if (element.matches('input, textarea, [contenteditable="true"]')) return false;
@@ -223,9 +187,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
     }
     if (!outgoing) return { userMessageFound: false, assistantTexts: [], protocolTexts: [], responseTurnTexts: [], followingTurnTexts: [] };
 
-    // DOM order is not always visual order: some chat layouts reorder turns with CSS.
-    // Prefer geometry after the exact outgoing bubble, falling back to DOM order only
-    // when geometry is unavailable. This prevents missing an answer rendered below it.
     const outgoingRect = outgoing.getBoundingClientRect();
     const outgoingHasRect = outgoing.getClientRects().length > 0;
     const followsOutgoingMessage = (element: Element): boolean => {
@@ -234,9 +195,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
       const followsInDom = Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)
         && !Boolean(position & Node.DOCUMENT_POSITION_CONTAINED_BY);
       const candidateHasRect = element.getClientRects().length > 0;
-      // Conversation DOM order is the primary source of truth. ChatGPT can place
-      // messages in nested/scrolling containers whose viewport geometry does not
-      // reflect their conversation order; geometry must not hide a later DOM turn.
       if (followsInDom) return true;
       if (outgoingHasRect && candidateHasRect) {
         const candidateRect = element.getBoundingClientRect();
@@ -244,9 +202,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
       }
       return false;
     };
-    // Prefer complete semantic assistant messages. Generic selectors such as
-    // ".markdown" often match descendants inside the same message and must not
-    // compete with the message container itself.
     const dedicatedAssistantNodes = queryNodes([
       ...options.assistantSelectors,
       '[data-message-author-role="assistant"]',
@@ -260,8 +215,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
 
     const dedicatedMessages = keepOutermostNodes(dedicatedAssistantNodes);
 
-    // Generic selectors are only a fallback when semantic message selectors
-    // find nothing. This avoids mixing full messages with markdown descendants.
     const fallbackNodes = dedicatedMessages.length > 0
       ? []
       : queryNodes([
@@ -276,14 +229,11 @@ async function readAssistantMessagesAfterOutgoingMessage(
       ? dedicatedMessages
       : keepOutermostNodes(fallbackNodes);
 
-    // Limit complete messages, not a mixed list of message containers and descendants.
     const assistantTexts = assistantNodes
       .map(textOf)
       .filter(Boolean)
       .slice(-maxAssistantNodesRead);
 
-    // Prefer actual conversation-turn containers. They may not be direct siblings of the
-    // selected user bubble, depending on ChatGPT's current nested DOM structure.
     let responseTurnTexts: string[] = [];
     let followingTurnTexts: string[] = [];
     const turnSelector = '[data-testid^="conversation-turn-"], [data-testid*="conversation-turn"]';
@@ -301,7 +251,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
       ? conversationTurns.filter((turn) => turn !== outgoingTurn && followsOutgoingMessage(turn)).slice(0, 6)
       : [];
     for (const turn of nextConversationTurns) {
-      // Stop at the next user turn; never drift into later exchanges.
       if (options.userSelectors.length && (turn.matches(options.userSelectors.join(',')) || turn.querySelector(options.userSelectors.join(',')))) break;
       const value = textOf(turn);
       if (value && !turn.querySelector('textarea, input, [contenteditable="true"]')) {
@@ -309,8 +258,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
         followingTurnTexts.push(value);
       }
     }
-    // Fallback for providers that do not expose conversation-turn containers. Use
-    // visual position instead of slicing only DOM-following siblings, then sort visually.
     if (!followingTurnTexts.length) {
       const parent = outgoingTurn.parentElement;
       if (parent) {
@@ -330,9 +277,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
       }
     }
 
-    // Only scan protocol-bearing nodes after a provider-matched user bubble. A generic
-    // fallback anchor can be a descendant of the prompt itself, whose remaining text may
-    // contain protocol examples rather than an assistant reply.
     let protocolTexts: string[] = [];
     if (matchedUserSelector) {
       const hasProtocolFields = (element: Element): boolean => {
@@ -354,7 +298,6 @@ async function readAssistantMessagesAfterOutgoingMessage(
   }, { userSelectors, assistantSelectors, expectedMessageId });
 }
 
-/** Extract the latest matching protocol object from assistant messages after an outgoing user message. */
 export function extractProtocolResponseAfterOutgoingMessage(
   assistantMessagesAfterOutgoingMessage: string[],
   expectedMessageId: string,
@@ -387,8 +330,6 @@ export async function sendAndReadLastAssistant(
   if (!composer) throw new NovaError('Champ de saisie du fournisseur introuvable.', 'BROWSER_SELECTOR_MISMATCH');
   trace('browser.composer.ready');
 
-  // A resumed session may reconnect while the provider is still answering the
-  // previous request. Drain that generation before taking the response baseline.
   const readyDeadline = Date.now() + timeoutMs;
   while (await findFirstVisible(page, selectors.stopButton)) {
     await throwIfAborted(page, selectors, signal);
@@ -418,7 +359,7 @@ export async function sendAndReadLastAssistant(
       try {
         await refreshed.fill(message, { timeout: 15000 });
         filled = true;
-      } catch { /* Reacquire once more after the next UI render. */ }
+      } catch {}
     }
   }
   if (!filled) throw new NovaError('Le champ de saisie a changé pendant son activation. Aucun message envoyé.', 'BROWSER_SELECTOR_MISMATCH');
@@ -441,7 +382,6 @@ export async function sendAndReadLastAssistant(
         : '';
       const stop = await findFirstVisible(page, selectors.stopButton).catch(() => undefined);
       const assistantStarted = assistant ? (await assistant.count().catch(() => beforeAssistantCount)) > beforeAssistantCount : false;
-      // A click can time out after the provider accepted it. Never resend once the composer cleared or a reply started.
       if (!composerText || !composerText.trim() || !composerText.includes(message) || stop || assistantStarted) {
         submitted = true;
         break;
@@ -487,8 +427,6 @@ export async function sendAndReadLastAssistant(
   }
   trace('browser.message.confirmed', { expectedMessageId });
 
-  // The timeout is an inactivity limit: it restarts while the provider is generating or the page is
-  // still changing, so long answers are not cut off. A hard cap still bounds the total wait.
   const hardDeadline = Date.now() + Math.max(timeoutMs * 5, 10 * 60 * 1000);
   let lastActivity = Date.now();
   let lastSignature = '';
@@ -521,8 +459,6 @@ export async function sendAndReadLastAssistant(
       ...anchored.protocolTexts.slice().reverse(),
       ...anchored.followingTurnTexts.slice().reverse(),
     ];
-    // Once the outgoing message is located, only inspect nodes after that anchor.
-    // Whole-page text can include JSON examples from the user's own prompt.
     const candidates = await selectResponseCandidates(
       anchored.userMessageFound,
       anchoredCandidates,
@@ -568,8 +504,6 @@ export async function sendAndReadLastAssistant(
     responseStarted ||= Boolean(text);
     const stop = Boolean(await findFirstVisible(page, selectors.stopButton));
 
-    // A stable non-protocol answer must trigger the existing protocol-repair path.
-    // Do not rely only on the stop button: some provider UIs leave it stuck visible.
     if (!text && assistantReplyChanged && credibleInvalidReply) {
       if (latestAssistantText === previousInvalidReply) stableInvalidReplyCount += 1;
       else {
@@ -594,19 +528,13 @@ export async function sendAndReadLastAssistant(
       stableInvalidReplyCount = 0;
     }
 
-    // Track actual rendered content, not merely the stop-button visibility. Some sites
-    // leave a stale stop control in the DOM; that must never extend the wait indefinitely.
     const signature = `${candidates.map((candidate) => candidate.length).join(',')}:${candidates.join('').slice(-4000)}:${text.length}:${stop}`;
     if (signature !== lastSignature) lastActivity = Date.now();
     lastSignature = signature;
 
-    // The provider can briefly expose the previous assistant turn after submission.
-    // Keep polling for the current request's acknowledgement instead of failing on stale UI text.
     if (text && text === previous) stableCount += 1;
     else stableCount = 0;
 
-    // A complete, valid protocol object for this message is the real end-of-reply signal.
-    // The stop button only speeds things up; if its selector is stuck we still accept after a longer stable period.
     if (text && (stableCount >= 2 && !stop || stableCount >= STABLE_POLLS_WITH_STOP_VISIBLE)) {
       if (Buffer.byteLength(text, 'utf8') > maxResponseBytes) {
         throw new NovaError(`Réponse du fournisseur trop volumineuse (limite ${maxResponseBytes} octets).`, 'AI_RESPONSE_TOO_LARGE');
@@ -615,7 +543,6 @@ export async function sendAndReadLastAssistant(
       return text;
     }
 
-    // The provider answered, but acknowledged another message id: fail now with the precise error.
     wrongAckPolls = wrongAck && wrongAck === unacknowledgedMessageId && !stop ? wrongAckPolls + 1 : 0;
     if (wrongAck) unacknowledgedMessageId = wrongAck;
     if (wrongAckPolls >= STABLE_POLLS_FOR_WRONG_ACK) {

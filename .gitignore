@@ -4,7 +4,7 @@ coverage/
 *.log
 .env
 .env.*
-.nova_agents
+.nova_agents/
 !.env.example
 !.env.sample
 release/
