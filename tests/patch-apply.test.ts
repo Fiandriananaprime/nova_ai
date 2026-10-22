@@ -58,6 +58,35 @@ describe('patch validation and reversible application', () => {
     expect(prepared.diff).not.toContain('@@ -1,99 +1,99 @@');
   });
 
+  it('validates and applies short-context patches to CRLF files while preserving CRLF', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'nova-agent-patch-'));
+    await writeFile(path.join(root, '.novaignore'), DEFAULT_NOVAIGNORE);
+    const file = path.join(root, 'README.md');
+    const original = '# Nova Agent\\r\\n\\r\\n**Nova Agent** est un agent local.\\r\\n';
+    await writeFile(file, original, 'utf8');
+    const hash = sha256(await readFile(file));
+    const patch = [
+      'diff --git a/README.md b/README.md',
+      '--- a/README.md',
+      '+++ b/README.md',
+      '@@ -1 +1,5 @@',
+      ' # Nova Agent',
+      '+',
+      '+## Propriétaire',
+      '+',
+      '+**Fiandriananaprime** — https://github.com/Fiandriananaprime',
+      '',
+    ].join('\\n');
+    const prepared = await validatePatch(root, patch, { 'README.md': hash });
+    const applied = await applyPreparedPatch(root, 'operation-crlf-test', patch, prepared);
+    const result = await readFile(file, 'utf8');
+    expect(result).toContain('## Propriétaire\\r\\n');
+    expect(result).toContain('**Nova Agent** est un agent local.\\r\\n');
+    expect(result.replaceAll('\\r\\n', '')).not.toContain('\\n');
+    await restoreBackup(root, applied.backupPath, true, applied.afterHashes);
+    expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
   it('rejects attempts to patch ignored files', async () => {
     const { hash } = await setup();
     const patch = patchFor('.env', 'password=x', 'password=y');
